@@ -1,0 +1,104 @@
+## ICML 2023: High Fidelity Image Counterfactuals with Probabilistic Causal Models
+`[Official implementation]` `[Huggingface demo coming soon!]`
+
+### Causal Generative Modelling:
+<img src="imgs/ukbb.png" width="100%" height="100%">
+<img src="imgs/chest.png" width="100%" height="100%">
+<img src="imgs/morpho.png" width="100%" height="100%">
+
+### Structure:
+
+```
+📦src                                  # main source code directory
+ ┣ 📂chest_xray                        # code for chest x-ray models/experiments
+ ┃ ┣ 📂pgm                             # graphical model for all SCM mechanisms except x's
+ ┃ ┃ ┣ 📜dscm.py                       # deep structural causal model module 
+ ┃ ┃ ┣ 📜flow_pgm.py                   # Flow mechanisms in Pyro
+ ┃ ┃ ┣ 📜layers.py                     # utility modules/layers
+ ┃ ┃ ┣ 📜resnet.py                     # attribute predictors
+ ┃ ┃ ┣ 📜train_cf.py                   # counterfactual training code
+ ┃ ┃ ┣ 📜train_cf.sh                   # launch script for counterfactual training
+ ┃ ┃ ┣ 📜train_cls_mimic.sh            # launch script for attribute predictor training
+ ┃ ┃ ┣ 📜train_pgm.py                  # SCM mechanisms training code (Pyro)
+ ┃ ┃ ┣ 📜train_pgm_mimic.sh            # launch script for pgm training
+ ┃ ┃ ┗ 📜utils_pgm.py                  # pgm utilities
+ ┃ ┣ 📜chexpert.py                     # chexpert dataset definition
+ ┃ ┣ 📜hps.py                          # hyperparameters
+ ┃ ┣ 📜main.py                         # main file
+ ┃ ┣ 📜mimic.py                        # mimic dataset definition
+ ┃ ┣ 📜run_mimic.sh                    # launch script for HVAE causal mechanism training
+ ┃ ┣ 📜trainer.py                      # training code for HVAE causal mechanism
+ ┃ ┣ 📜train_setup.py                  # training helpers
+ ┃ ┣ 📜utils.py                        # utilities for training/plotting
+ ┃ ┗ 📜vae.py                          # HVAE model definition, exogenous prior mechanism only
+ ┣ 📂pgm                               # graphical models for all SCM mechanisms except the image (Morpho-MNIST, UKBB, ColourMNIST datasets)
+ ┃ ┣ 📜dscm.py                         # deep structural causal model module
+ ┃ ┣ 📜flow_pgm.py                     # Flow mechanisms in Pyro
+ ┃ ┣ 📜layers.py                       # utility modules/layers
+ ┃ ┣ 📜run.sh                          # launch script for counterfactual training
+ ┃ ┣ 📜train_cf.py                     # counterfactual training code
+ ┃ ┣ 📜train_pgm.py                    # SCM mechanisms training code (Pyro)
+ ┃ ┗ 📜utils_pgm.py                    # utilities
+ ┣ 📜datasets.py                       # Morpho-MNIST, UKBB and ColourMNIST datasets
+ ┣ 📜dmol.py                           # discretized mixture of logistics likelihood code
+ ┣ 📜hps.py                            # hyperparameters for above datasets
+ ┣ 📜main.py                           # main file
+ ┣ 📜run.sh                            # launch script for HVAE causal mechanism training
+ ┣ 📜simple_vae.py                     # simple vae architecture
+ ┣ 📜trainer.py                        # training code for image x's causal mechanism
+ ┣ 📜train_setup.py                    # training helpers
+ ┣ 📜utils.py                          # utilities for training/plotting
+ ┗ 📜vae.py                            # HVAE definition; exogenous prior and latent mediator models 
+ ```
+
+### Overview
+Our deep structural causal models (SCMs) were designed to be modular: in all instances the causal mechanism for the structured variable (i.e. image $\mathbf{x}$) is trained separately from the other mechanisms in the associated causal graph.
+This enables direct and fair comparisons of different causal mechanisms for $\mathbf{x}$ by holding the remaining mechanisms fixed when making comparisons. 
+
+We use the universal probabilistic programming language (PPL) [Pyro](https://pyro.ai/) for the following:
+
+1. Modelling and training all SCM mechanisms except for the image $\mathbf{x}$'s, see code in `src/pgm`; 
+2. The counterfactual inference engine, see `src/pgm/flow_pgm.py`; 
+3. Proposed constrained counterfactual training technique, see `src/pgm/train_cf.py`.
+
+Pyro enables flexible and expressive deep probabilistic modeling, for more details refer to the [official site](https://pyro.ai/). 
+
+Our HVAE-based causal mechanisms (`src/vae.py`) are trained outside of Pyro using Pytorch, and all trained mechanisms are subsequently merged into a single Pytorch module to create a DSCM. See `src/pgm/dscm.py` for an example.
+
+The code for the MIMIC Chest X-ray models and experiments is separate from the rest (at least for now) and can be found in `src/chest_xray`.
+
+### Requirements
+To run the code you will need to install the requirements listed in the `requirements.txt` file. E.g. from inside your env of choice run:
+```
+pip install -r requirements.txt
+```
+
+### Data
+For ease of use, we provide the [Morpho-MNIST](https://github.com/dccastro/Morpho-MNIST) dataset we used in `datasets/morphomnist`. For more details on the associated SCM and data generating process see the source code [here](https://github.com/biomedia-mira/deepscm) and the original DSCM paper [here](https://arxiv.org/abs/2006.06485). 
+
+The Colour-MNIST dataset we used can be found in `datasets/mnist_digit_colour` and was generated according to [this paper](https://arxiv.org/abs/2303.01274).
+
+Unfortunataly we are unable to share the UK Biobank brain data or the MIMIC-CXR chest x-ray data. 
+
+If you're interested in gaining access, we recommend you check out the specific documents provided. These resources contain all the necessary details regarding the application process, as well as the eligibility criteria. Application and eligibility criteria for gaining access are detailed [here](https://www.ukbiobank.ac.uk/enable-your-research/apply-for-access) and [here](https://physionet.org/content/mimic-cxr/2.0.0/) respectively.
+
+### Run
+To launch (local) training of the HVAE mechanism simply run the following script from inside the `src` directory:
+```
+bash run_local.sh your_experiment_name
+```
+To run in the background you can append `nohup` to the command: `bash run_local.sh your_experiment_name nohup`. Adjust the `run_command` inside the script as needed. Hyperparameters can be found in `src/hps.py`.
+If using [Slurm Workload Manager](https://slurm.schedmd.com/documentation.html), adjust `src/run_slurm.sh` as needed and launch as `bash run_slurm.sh`.
+
+Example (loose) steps to add your own dataset and associated SCM:
+
+1. Add dataset class definition to `src/datasets` and setup the dataloader in `src/train_setup.py`
+2. Add associated causal graph and mechanism definitions in `src/pgm/flow_pgm.py`
+3. Adjust HVAE hyperparameters needed for your dataset (input resolution, architecture etc) in `src/hps.py`
+4. Train the HVAE mechanism as above, and train all other mechanisms (separately) using `src/pgm/train_pgm.py`
+
+If you'd like to make the HVAE more lightweight you can try reducing the number of blocks at each resolution and reducing the block width (hyperparameters `enc_arch`, `dec_arch` and `width` found in `src/hps.py`). The block `version == "light"` in `src/vae.py` also uses half as much VRAM.
+
+To resume training from a checkpoint simply adjust the argument: `--resume=/path/to/your/checkpoint.pt`.
+
+(readme is work in progress)

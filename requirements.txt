@@ -1,0 +1,14 @@
+imageio==2.26.0
+matplotlib==3.7.1
+numpy==1.24.3
+pandas==1.5.3
+pandas==2.0.1
+Pillow==9.3.0
+pyro_ppl==1.8.4
+scikit_learn==1.2.2
+seaborn==0.12.2
+Send2Trash==1.8.2
+skimage==0.0
+torch==2.0.0
+torchvision==0.15.0
+tqdm==4.65.0
