@@ -1,17 +1,34 @@
-## ICML 2023: High Fidelity Image Counterfactuals with Probabilistic Causal Models
-[Huggingface demo here!](https://huggingface.co/spaces/mira-causality/counterfactuals)
+## Causal Generative Modelling
+[:hugs:Huggingface demo here!:hugs:](https://huggingface.co/spaces/mira-causality/counterfactuals)
 
-### Causal Generative Modelling:
+Code for the **ICML 2023** paper:
+
+>[**High Fidelity Image Counterfactuals with Probabilistic Causal Models**](https://arxiv.org/abs/2306.15764)\
+>Fabio De Sousa Ribeiro<sup>1</sup>, Tian Xia<sup>1</sup>, Miguel Monteiro<sup>1</sup>, Nick Pawlowski<sup>2</sup>, Ben Glocker<sup>1</sup>\
+><sup>1</sup>Imperial College London, <sup>2</sup>Microsoft Research Cambridge, UK
+
+BibTeX (arXiv for now):
+```
+@misc{ribeiro2023high,
+      title={High Fidelity Image Counterfactuals with Probabilistic Causal Models}, 
+      author={Fabio De Sousa Ribeiro and Tian Xia and Miguel Monteiro and Nick Pawlowski and Ben Glocker},
+      year={2023},
+      eprint={2306.15764},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG}
+}
+```
+### Example Results:
 <img src="imgs/ukbb.png" width="100%" height="100%">
 <img src="imgs/chest.png" width="100%" height="100%">
 <img src="imgs/morpho.png" width="100%" height="100%">
 
-### Structure:
+### Project Structure:
 
 ```
 📦src                                  # main source code directory
  ┣ 📂pgm                               # graphical models for all SCM mechanisms except the image's
- ┃ ┣ 📜dscm.py                         # deep structural causal model pytorch module
+ ┃ ┣ 📜dscm.py                         # deep structural causal model Pytorch module
  ┃ ┣ 📜flow_pgm.py                     # Flow mechanisms in Pyro
  ┃ ┣ 📜layers.py                       # utility modules/layers
  ┃ ┣ 📜resnet.py                       # resnet model definition
@@ -33,7 +50,7 @@
  ```
 
 ### Overview
-Our deep structural causal models (SCMs) were designed to be modular: in all instances the causal mechanism for the structured variable (i.e. image $\mathbf{x}$) is trained separately from the other mechanisms in the associated causal graph.
+Our deep structural causal models (SCMs) were designed to be modular: in all instances, the causal mechanism for the structured variable (i.e. image $\mathbf{x}$) is trained separately from the other mechanisms in the associated causal graph.
 This enables direct and fair comparisons of different causal mechanisms for $\mathbf{x}$ by holding the remaining mechanisms fixed when making comparisons. 
 
 We use the universal probabilistic programming language (PPL) [Pyro](https://pyro.ai/) for the following:
@@ -46,8 +63,6 @@ Pyro enables flexible and expressive deep probabilistic modeling, for more detai
 
 Our HVAE-based causal mechanisms (`src/vae.py`) are trained outside of Pyro using Pytorch, and all trained mechanisms are subsequently merged into a single Pytorch module to create a DSCM. See `src/pgm/dscm.py` for an example.
 
-The code for the MIMIC Chest X-ray models and experiments is separate from the rest (at least for now) and can be found in `src/chest_xray`.
-
 ### Requirements
 To run the code you will need to install the requirements listed in the `requirements.txt` file. E.g. from inside your env of choice run:
 ```
@@ -55,11 +70,11 @@ pip install -r requirements.txt
 ```
 
 ### Data
-For ease of use, we provide the [Morpho-MNIST](https://github.com/dccastro/Morpho-MNIST) dataset we used in `datasets/morphomnist`. For more details on the associated SCM and data generating process see the source code [here](https://github.com/biomedia-mira/deepscm) and the original DSCM paper [here](https://arxiv.org/abs/2006.06485). 
+For ease of use, we provide the [Morpho-MNIST](https://github.com/dccastro/Morpho-MNIST) dataset we used in `datasets/morphomnist`. For more details on the associated SCM and data-generating process see the source code [here](https://github.com/biomedia-mira/deepscm) and the original DSCM paper [here](https://arxiv.org/abs/2006.06485). 
 
-The Colour-MNIST dataset we used can be found in `datasets/mnist_digit_colour` and was generated according to [this paper](https://arxiv.org/abs/2303.01274).
+The Colour-MNIST dataset we used was generated according to [this paper](https://arxiv.org/abs/2303.01274).
 
-Unfortunataly we are unable to share the UK Biobank brain data or the MIMIC-CXR chest x-ray data. 
+Unfortunately, we are unable to share the UK Biobank brain data or the MIMIC-CXR chest x-ray data. 
 
 If you're interested in gaining access, we recommend you check out the specific documents provided. These resources contain all the necessary details regarding the application process, as well as the eligibility criteria. Application and eligibility criteria for gaining access are detailed [here](https://www.ukbiobank.ac.uk/enable-your-research/apply-for-access) and [here](https://physionet.org/content/mimic-cxr/2.0.0/) respectively.
 
@@ -75,11 +90,11 @@ Example (loose) steps to add your own dataset and associated SCM:
 
 1. Add dataset class definition to `src/datasets` and setup the dataloader in `src/train_setup.py`
 2. Add associated causal graph and mechanism definitions in `src/pgm/flow_pgm.py`
-3. Adjust HVAE hyperparameters needed for your dataset (input resolution, architecture etc) in `src/hps.py`
+3. Adjust HVAE hyperparameters needed for your dataset (input resolution, architecture, etc) in `src/hps.py`
 4. Train the HVAE mechanism as above, and train all other mechanisms (separately) using `src/pgm/train_pgm.py`
 
-If you'd like to make the HVAE more lightweight you can try reducing the number of blocks at each resolution and reducing the block width (hyperparameters `enc_arch`, `dec_arch` and `width` found in `src/hps.py`). The block `version == "light"` in `src/vae.py` also uses half as much VRAM.
+If you'd like to make the HVAE more lightweight you can try reducing the number of blocks at each resolution and reducing the block width (hyperparameters `enc_arch`, `dec_arch`, and `width` found in `src/hps.py`). The block `version == "light"` in `src/vae.py` also uses half as much VRAM.
 
 To resume training from a checkpoint simply adjust the argument: `--resume=/path/to/your/checkpoint.pt`.
 
-(readme is work in progress)
+(readme is a work in progress)
