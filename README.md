@@ -1,4 +1,4 @@
-## Causal Generative Modelling
+## Causal Generative Modelling: Image Counterfactuals
 [:hugs:Huggingface demo here!:hugs:](https://huggingface.co/spaces/mira-causality/counterfactuals)
 
 Code for the **ICML 2023** paper:
