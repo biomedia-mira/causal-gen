@@ -239,7 +239,7 @@ def write_images(args: Hparams, model: nn.Module, batch: Dict[str, Tensor]):
         x = (x.permute(0, 2, 3, 1) + 1.0) * 127.5  # channels last, [0,255]
         return x.detach().cpu().numpy()
 
-    def counterfactuals(
+    def pseudo_counterfactuals(
         model: nn.Module,
         z: List[Tensor],
         pa: Dict[str, Tensor],
@@ -248,12 +248,14 @@ def write_images(args: Hparams, model: nn.Module, batch: Dict[str, Tensor]):
         alpha: Optional[float] = None,
         t: Optional[float] = None,
     ):
-        """ Note that this function is only used here for visualizing/debugging x's 
-        mechanism throughout training and does not infer x's (observation space) exogenous
-        noise term "u". For a complete and succinct example of counterfactual inference 
-        you may refer to our demo:
-         https://huggingface.co/spaces/mira-causality/counterfactuals/blob/main/app.py
-         (specifically the counterfactual_inference() function).
+        """ Note that this function is only here for debugging purposes.
+        It does not take into account the associated causal graph nor infer x's 
+        (observation space) exogenous noise term "u". For a complete example of 
+        counterfactual inference you may refer to our demo:
+         
+          https://huggingface.co/spaces/mira-causality/counterfactuals/blob/main/app.py
+         
+        (specifically the counterfactual_inference() function).
         """
         # x = g(pa, z)
         x_rec, _ = model.forward_latents(latents=z, parents=pa, t=t)
@@ -395,9 +397,9 @@ def write_images(args: Hparams, model: nn.Module, batch: Dict[str, Tensor]):
                 z_l = z_i[:l]
 
             if model.cond_prior:
-                counterfactuals(model, z_l, pa, cf_pa, x=x, alpha=alpha, t=t)
+                pseudo_counterfactuals(model, z_l, pa, cf_pa, x=x, alpha=alpha, t=t)
             else:
-                counterfactuals(model, z_l, pa, cf_pa, t=t)
+                pseudo_counterfactuals(model, z_l, pa, cf_pa, t=t)
             viz_images.append(orig * 0)  # empty row
 
     # zero pad each row to have same number of columns for plotting
