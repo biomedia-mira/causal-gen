@@ -1,9 +1,11 @@
 import os
+import gc
 import argparse
 import traceback
 import send2trash
 import torch
 
+from hps import Hparams
 from vae import HVAE
 from simple_vae import VAE
 from train_setup import (
@@ -17,9 +19,10 @@ from utils import seed_all, EMA
 from trainer import trainer
 
 
-def main(args):
+def main(args: Hparams):
     seed_all(args.seed, args.deterministic)
     # update hyperparams if resuming from a checkpoint
+    ckpt = None
     if args.resume:
         if os.path.isfile(args.resume):
             print(f"\nLoading checkpoint: {args.resume}")
@@ -50,6 +53,7 @@ def main(args):
 
     model.apply(init_bias)
     ema = EMA(model, beta=args.ema_rate)
+    ema.ema_model.eval()
 
     # setup model save directory, logging and tensorboard summaries
     assert args.exp_name != "", "No experiment name given."
@@ -65,33 +69,31 @@ def main(args):
     model.to(args.device)
     ema.to(args.device)
 
-    # load checkpoint
-    if args.resume:
-        if os.path.isfile(args.resume):
-            args.start_epoch = ckpt["epoch"]
-            args.iter = ckpt["step"]
-            args.best_loss = ckpt["best_loss"]
-            model.load_state_dict(ckpt["model_state_dict"])
-            ema.ema_model.load_state_dict(ckpt["ema_model_state_dict"])
-            optimizer.load_state_dict(ckpt["optimizer_state_dict"])
-            # scheduler.load_state_dict(ckpt['scheduler_state_dict'])
-            # update lr of the loaded optimizer
-            for g in optimizer.param_groups:
-                g["lr"] = args.lr
-                g["initial_lr"] = args.lr  # needed to init the scheduler lr
-            scheduler = torch.optim.lr_scheduler.LambdaLR(
-                optimizer, lr_lambda=lambda x: x * 0 + 1
-            )
-        else:
-            print("Checkpoint not found at: {}".format(args.resume))
+    # load checkpoint state dicts
+    if ckpt is not None:
+        model.load_state_dict(ckpt["model_state_dict"])
+        ema.ema_model.load_state_dict(ckpt["ema_model_state_dict"])
+        optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+        # scheduler.load_state_dict(ckpt['scheduler_state_dict'])
+        # update lr of the loaded optimizer
+        for p_group in optimizer.param_groups:
+            p_group["lr"] = args.lr
+            p_group["initial_lr"] = args.lr  # needed to init the scheduler lr
+        scheduler = torch.optim.lr_scheduler.LambdaLR(
+            optimizer, lr_lambda=lambda x: x * 0 + 1
+        )
+        args.start_epoch, args.iter = ckpt["epoch"], ckpt["step"]
+        args.best_loss = ckpt["best_loss"]
+        del ckpt  # remove reference to checkpoint
     else:
-        args.start_epoch, args.iter = 0, 0
-        args.best_loss = float("inf")
+        args.start_epoch, args.iter, args.best_loss = 0, 0, float("inf")
 
     # train
     try:
+        gc.collect()
+        torch.cuda.empty_cache()
         trainer(args, model, ema, dataloaders, optimizer, scheduler, writer, logger)
-    except:
+    except KeyboardInterrupt:
         print(traceback.format_exc())
         if input("Training interrupted, keep logs? [Y/n]: ") == "n":
             if input(f"Send '{args.save_dir}' to Trash? [y/N]: ") == "y":

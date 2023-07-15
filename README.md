@@ -1,5 +1,5 @@
 ## ICML 2023: High Fidelity Image Counterfactuals with Probabilistic Causal Models
-`[Official implementation]` `[Huggingface demo coming soon!]`
+[Huggingface demo here!](https://huggingface.co/spaces/mira-causality/counterfactuals)
 
 ### Causal Generative Modelling:
 <img src="imgs/ukbb.png" width="100%" height="100%">
@@ -10,41 +10,22 @@
 
 ```
 📦src                                  # main source code directory
- ┣ 📂chest_xray                        # code for chest x-ray models/experiments
- ┃ ┣ 📂pgm                             # graphical model for all SCM mechanisms except x's
- ┃ ┃ ┣ 📜dscm.py                       # deep structural causal model module 
- ┃ ┃ ┣ 📜flow_pgm.py                   # Flow mechanisms in Pyro
- ┃ ┃ ┣ 📜layers.py                     # utility modules/layers
- ┃ ┃ ┣ 📜resnet.py                     # attribute predictors
- ┃ ┃ ┣ 📜train_cf.py                   # counterfactual training code
- ┃ ┃ ┣ 📜train_cf.sh                   # launch script for counterfactual training
- ┃ ┃ ┣ 📜train_cls_mimic.sh            # launch script for attribute predictor training
- ┃ ┃ ┣ 📜train_pgm.py                  # SCM mechanisms training code (Pyro)
- ┃ ┃ ┣ 📜train_pgm_mimic.sh            # launch script for pgm training
- ┃ ┃ ┗ 📜utils_pgm.py                  # pgm utilities
- ┃ ┣ 📜chexpert.py                     # chexpert dataset definition
- ┃ ┣ 📜hps.py                          # hyperparameters
- ┃ ┣ 📜main.py                         # main file
- ┃ ┣ 📜mimic.py                        # mimic dataset definition
- ┃ ┣ 📜run_mimic.sh                    # launch script for HVAE causal mechanism training
- ┃ ┣ 📜trainer.py                      # training code for HVAE causal mechanism
- ┃ ┣ 📜train_setup.py                  # training helpers
- ┃ ┣ 📜utils.py                        # utilities for training/plotting
- ┃ ┗ 📜vae.py                          # HVAE model definition, exogenous prior mechanism only
- ┣ 📂pgm                               # graphical models for all SCM mechanisms except the image (Morpho-MNIST, UKBB, ColourMNIST datasets)
- ┃ ┣ 📜dscm.py                         # deep structural causal model module
+ ┣ 📂pgm                               # graphical models for all SCM mechanisms except the image's
+ ┃ ┣ 📜dscm.py                         # deep structural causal model pytorch module
  ┃ ┣ 📜flow_pgm.py                     # Flow mechanisms in Pyro
  ┃ ┣ 📜layers.py                       # utility modules/layers
- ┃ ┣ 📜run.sh                          # launch script for counterfactual training
+ ┃ ┣ 📜resnet.py                       # resnet model definition
+ ┃ ┣ 📜run.sh                          # example launch script for counterfactual training (slurm)
  ┃ ┣ 📜train_cf.py                     # counterfactual training code
  ┃ ┣ 📜train_pgm.py                    # SCM mechanisms training code (Pyro)
- ┃ ┗ 📜utils_pgm.py                    # utilities
- ┣ 📜datasets.py                       # Morpho-MNIST, UKBB and ColourMNIST datasets
- ┣ 📜dmol.py                           # discretized mixture of logistics likelihood code
- ┣ 📜hps.py                            # hyperparameters for above datasets
+ ┃ ┗ 📜utils_pgm.py                    # graphical model utilities
+ ┣ 📜datasets.py                       # dataset definitions
+ ┣ 📜dmol.py                           # discretized mixture of logistics likelihood
+ ┣ 📜hps.py                            # hyperparameters for all datasets
  ┣ 📜main.py                           # main file
- ┣ 📜run.sh                            # launch script for HVAE causal mechanism training
- ┣ 📜simple_vae.py                     # simple vae architecture
+ ┣ 📜run_local.sh                      # example launch script for HVAE causal mechanism training
+ ┣ 📜run_slurm.sh                      # same as above but for slurm jobs
+ ┣ 📜simple_vae.py                     # single stochastic layer VAE
  ┣ 📜trainer.py                        # training code for image x's causal mechanism
  ┣ 📜train_setup.py                    # training helpers
  ┣ 📜utils.py                          # utilities for training/plotting

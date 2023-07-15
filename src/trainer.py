@@ -1,13 +1,19 @@
+from typing import Dict, Union, Any
 import os
 import copy
+import logging
+
 import torch
-import torch.nn as nn
-
+from torch import nn, Tensor
+from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
+
 from utils import linear_warmup, write_images
+from hps import Hparams
 
 
-def preprocess_batch(args, batch, expand_pa=False):
+def preprocess_batch(args: Hparams, batch: Dict[str, Tensor], expand_pa: bool = False):
     batch["x"] = (batch["x"].to(args.device).float() - 127.5) / 127.5  # [-1, 1]
     batch["pa"] = batch["pa"].to(args.device).float()
     if expand_pa:  # used for HVAE parent concatenation
@@ -15,12 +21,21 @@ def preprocess_batch(args, batch, expand_pa=False):
     return batch
 
 
-def trainer(args, model, ema, dataloaders, optimizer, scheduler, writer, logger):
+def trainer(
+    args: Hparams,
+    model: nn.Module,
+    ema: nn.Module,
+    dataloaders: Dict[str, DataLoader],
+    optimizer: torch.optim.Optimizer,
+    scheduler: Any,
+    writer: SummaryWriter,
+    logger: logging.Logger,
+):
     for k in sorted(vars(args)):
         logger.info(f"--{k}={vars(args)[k]}")
     logger.info(f"total params: {sum(p.numel() for p in model.parameters()):,}")
 
-    def run_epoch(dataloader, training=True):
+    def run_epoch(dataloader: DataLoader, training: bool = True):
         model.train(training)
         model.zero_grad(set_to_none=True)
         stats = {k: 0 for k in ["elbo", "nll", "kl", "n"]}
@@ -73,20 +88,18 @@ def trainer(args, model, ema, dataloaders, optimizer, scheduler, writer, logger)
 
                     if args.iter % args.viz_freq == 0 or (args.iter in early_evals):
                         with torch.no_grad():
-                            ema.ema_model.train(False)
                             write_images(args, ema.ema_model, viz_batch)
             else:
                 with torch.no_grad():
-                    ema.ema_model.train(False)
                     out = ema.ema_model(batch["x"], batch["pa"], beta=args.beta)
 
             if update_stats:
                 if training:
                     out["elbo"] *= args.accu_steps
-            stats["n"] += bs  # samples seen counter
-            stats["elbo"] += out["elbo"] * bs
-            stats["nll"] += out["nll"] * bs
-            stats["kl"] += out["kl"] * bs
+                stats["n"] += bs  # samples seen counter
+                stats["elbo"] += out["elbo"].detach() * bs
+                stats["nll"] += out["nll"].detach() * bs
+                stats["kl"] += out["kl"].detach() * bs
 
             split = "train" if training else "valid"
             loader.set_description(

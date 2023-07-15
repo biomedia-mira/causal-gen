@@ -34,4 +34,20 @@ srun python main.py \
     --x_like=diag_dgauss \
     --z_max_res=96 \
     --eval_freq=4
+
+# srun python main.py \
+#     --data_dir='mimic-cxr-jpg-224/data/' \
+#     --csv_dir='mimic_meta' \
+#     --use_dataset='mimic' \
+#     --hps mimic192 \
+#     --exp_name=$exp_name \
+#     --parents_x age race sex finding\
+#     --context_dim=6 \
+#     --lr=1e-3 \
+#     --bs=24 \
+#     --wd=0.05 \
+#     --beta=9 \
+#     --x_like='diag_dgauss' \
+#     --z_max_res=96 \
+#     --eval_freq=2
 EOT

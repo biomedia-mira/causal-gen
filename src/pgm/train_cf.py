@@ -1,22 +1,16 @@
+from typing import Dict, Any, List, Tuple, Optional
 import os
 import sys
-
-sys.path.append("..")  # imports from parent dir
 import copy
 import random
 import argparse
 
 import torch
-import torch.nn as nn
+from torch import nn, Tensor
+from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
-
 from tqdm import tqdm
 from sklearn.metrics import roc_auc_score
-
-from train_setup import setup_directories, setup_tensorboard, setup_logging
-from datasets import get_attr_max_min
-from utils import EMA, seed_all
-from vae import HVAE
 
 from train_pgm import preprocess, sup_epoch, eval_epoch
 from utils_pgm import plot_cf, update_stats
@@ -24,12 +18,19 @@ from layers import TraceStorage_ELBO
 from flow_pgm import FlowPGM
 from dscm import DSCM
 
+sys.path.append("..")
+from train_setup import setup_directories, setup_tensorboard, setup_logging
+from datasets import get_attr_max_min
+from utils import EMA, seed_all
+from hps import Hparams
+from vae import HVAE
 
-def loginfo(title, logger, stats):
+
+def loginfo(title: str, logger: Any, stats: Dict[str, Any]):
     logger.info(f"{title} | " + " - ".join(f"{k}: {v:.4f}" for k, v in stats.items()))
 
 
-def inv_preprocess(pa):
+def inv_preprocess(pa: Dict[str, Tensor]) -> Dict[str, Tensor]:
     # undo [-1,1] parent preprocessing back to original range
     for k, v in pa.items():
         if k != "mri_seq" and k != "sex":
@@ -39,7 +40,14 @@ def inv_preprocess(pa):
     return pa
 
 
-def save_plot(save_path, obs, cfs, do, var_cf_x=None, num_images=10):
+def save_plot(
+    save_path: str,
+    obs: Dict[str, Tensor],
+    cfs: Dict[str, Tensor],
+    do: Dict[str, Tensor],
+    var_cf_x: Optional[Tensor] = None,
+    num_images: int = 10,
+) -> None:
     _ = plot_cf(
         obs["x"],
         cfs["x"],
@@ -53,31 +61,63 @@ def save_plot(save_path, obs, cfs, do, var_cf_x=None, num_images=10):
     plt.close()
 
 
-def get_metrics(preds, targets):
+def get_metrics(
+    dataset: str, preds: Dict[str, List[Tensor]], targets: Dict[str, List[Tensor]]
+) -> Dict[str, Tensor]:
     for k, v in preds.items():
         preds[k] = torch.stack(v).squeeze().cpu()
         targets[k] = torch.stack(targets[k]).squeeze().cpu()
     stats = {}
     for k in preds.keys():
-        if k == "mri_seq" or k == "sex":
-            stats[k + "_rocauc"] = roc_auc_score(
-                targets[k].numpy(), preds[k].numpy(), average="macro"
-            )
-            stats[k + "_acc"] = (
-                targets[k] == torch.round(preds[k])
-            ).sum().item() / targets[k].shape[0]
+        if "ukbb" in dataset:
+            if k == "mri_seq" or k == "sex":
+                stats[k + "_rocauc"] = roc_auc_score(
+                    targets[k].numpy(), preds[k].numpy(), average="macro"
+                )
+                stats[k + "_acc"] = (
+                    targets[k] == torch.round(preds[k])
+                ).sum().item() / targets[k].shape[0]
+            else:  # continuous variables
+                preds_k = (preds[k] + 1) / 2  # [-1,1] -> [0,1]
+                _max, _min = get_attr_max_min(k)
+                preds_k = preds_k * (_max - _min) + _min
+                norm = 1000 if "volume" in k else 1  # for volume in ml
+                stats[k + "_mae"] = (targets[k] - preds_k).abs().mean().item() / norm
+        elif "mimic" in dataset:
+            if k in ["sex", "finding"]:
+                stats[k + "_rocauc"] = roc_auc_score(
+                    targets[k].numpy(), preds[k].numpy(), average="macro"
+                )
+                stats[k + "_acc"] = (
+                    targets[k] == torch.round(preds[k])
+                ).sum().item() / targets[k].shape[0]
+            elif k == "age":
+                preds_k = (preds[k] + 1) * 50  # unormalize
+                targets_k = (targets[k] + 1) * 50  # unormalize
+                stats[k + "_mae"] = (targets_k - preds_k).abs().mean().item()
+            elif k == "race":
+                num_corrects = (targets[k].argmax(-1) == preds[k].argmax(-1)).sum()
+                stats[k + "_acc"] = num_corrects.item() / targets[k].shape[0]
+                stats[k + "_rocauc"] = roc_auc_score(
+                    targets[k].numpy(),
+                    preds[k].numpy(),
+                    multi_class="ovr",
+                    average="macro",
+                )
         else:
-            preds_k = (preds[k] + 1) / 2  # [-1,1] -> [0,1]
-            _max, _min = get_attr_max_min(k)
-            preds_k = preds_k * (_max - _min) + _min
-            norm = 1000 if "volume" in k else 1  # for volume in ml
-            stats[k + "_mae"] = (
-                torch.mean(torch.abs(targets[k] - preds_k)).item() / norm
-            )
+            NotImplementedError
     return stats
 
 
-def cf_epoch(args, model, ema, dataloaders, elbo_fn, optimizers, split="train"):
+def cf_epoch(
+    args: Hparams,
+    model: nn.Module,
+    ema: nn.Module,
+    dataloaders: Dict[str, DataLoader],
+    elbo_fn: TraceStorage_ELBO,
+    optimizers: Optional[Tuple] = None,
+    split: str = "train",
+):
     "counterfactual auxiliary training/eval epoch"
     is_train = split == "train"
     model.vae.train(is_train)
@@ -87,7 +127,7 @@ def cf_epoch(args, model, ema, dataloaders, elbo_fn, optimizers, split="train"):
     steps_skipped = 0
 
     dag_vars = list(model.pgm.variables.keys())
-    if is_train:
+    if is_train and isinstance(optimizers, tuple):
         optimizer, lagrange_opt = optimizers
     else:
         preds = {k: [] for k in dag_vars}
@@ -178,7 +218,7 @@ def cf_epoch(args, model, ema, dataloaders, elbo_fn, optimizers, split="train"):
             + (f", grad_norm: {grad_norm:.3f}" if is_train else "")
         )
     stats = {k: v / stats["n"] for k, v in stats.items() if k != "n"}
-    return stats if is_train else (stats, get_metrics(preds, targets))
+    return stats if is_train else (stats, get_metrics(args.dataset, preds, targets))
 
 
 if __name__ == "__main__":
@@ -260,11 +300,6 @@ if __name__ == "__main__":
 
     seed_all(args.seed, args.deterministic)
 
-    class Hparams:
-        def update(self, dict):
-            for k, v in dict.items():
-                setattr(self, k, v)
-
     # Load predictors
     print(f"\nLoading predictor checkpoint: {args.predictor_path}")
     predictor_checkpoint = torch.load(args.predictor_path)
@@ -273,10 +308,14 @@ if __name__ == "__main__":
     predictor = FlowPGM(predictor_args).cuda()
     predictor.load_state_dict(predictor_checkpoint["ema_model_state_dict"])
 
+    # for backwards compatibility
+    if not hasattr(predictor_args, "dataset"):
+        predictor_args.dataset = "ukbb"
+    if hasattr(predictor_args, "loss_norm"):
+        args.loss_norm
+
     from train_pgm import setup_dataloaders
 
-    if not hasattr(predictor_args, "dataset"):  # for backwards compatibility
-        predictor_args.dataset = "ukbb"
     if args.data_dir != "":
         predictor_args.data_dir = args.data_dir
     dataloaders = setup_dataloaders(predictor_args)
@@ -302,9 +341,8 @@ if __name__ == "__main__":
     pgm = FlowPGM(pgm_args).cuda()
     pgm.load_state_dict(pgm_checkpoint["ema_model_state_dict"])
 
-    from train_pgm import setup_dataloaders
-
-    if not hasattr(pgm_args, "dataset"):  # for backwards compatibility
+    # for backwards compatibility
+    if not hasattr(pgm_args, "dataset"):
         pgm_args.dataset = "ukbb"
     if args.data_dir != "":
         pgm_args.data_dir = args.data_dir
@@ -325,8 +363,6 @@ if __name__ == "__main__":
     vae_args.kl_free_bits = vae_args.free_bits
     vae = HVAE(vae_args).cuda()
     vae.load_state_dict(vae_checkpoint["ema_model_state_dict"])
-
-    from train_setup import setup_dataloaders
 
     # vae_args.data_dir = None  # adjust data_dir as needed
     if args.data_dir != "":
@@ -371,7 +407,7 @@ if __name__ == "__main__":
     args.input_res = vae_args.input_res
     args.grad_clip = vae_args.grad_clip
     args.grad_skip = vae_args.grad_skip
-    args.elbo_constraint = 1.841216802597046  # train set elbo
+    args.elbo_constraint = 1.841216802597046  # train set elbo constraint
     args.wd = vae_args.wd
     args.betas = vae_args.betas
 

@@ -1,3 +1,5 @@
+from typing import Tuple, Optional, List, Dict, TypedDict
+
 import os
 import gzip
 import struct
@@ -5,18 +7,28 @@ import random
 import numpy as np
 import pandas as pd
 import torch
+from torch import Tensor
+import torchvision
 import torchvision.transforms as TF
 import torch.nn.functional as F
 
 from torch.utils.data import Dataset
-from typing import Tuple
 from PIL import Image
+from tqdm import tqdm
+
 from utils import normalize, log_standardize
+from hps import Hparams
 
 
 class UKBBDataset(Dataset):
     def __init__(
-        self, root, csv_file, transform=None, columns=None, norm=None, concat_pa=True
+        self,
+        root: str,
+        csv_file: str,
+        transform: Optional[torchvision.transforms.Compose],
+        columns: Optional[List[str]],
+        norm: Optional[str],
+        concat_pa=True,
     ):
         super().__init__()
         self.root = root
@@ -52,7 +64,7 @@ class UKBBDataset(Dataset):
     def __len__(self):
         return len(self.df)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> Dict[str, Tensor]:
         sample = {k: v[idx] for k, v in self.samples.items()}
 
         if self.return_x:
@@ -75,7 +87,7 @@ class UKBBDataset(Dataset):
         return sample
 
 
-def get_attr_max_min(attr):
+def get_attr_max_min(attr: str):
     # some ukbb dataset (max, min) stats
     if attr == "age":
         return 73, 44
@@ -87,7 +99,7 @@ def get_attr_max_min(attr):
         NotImplementedError
 
 
-def ukbb(args):
+def ukbb(args: Hparams) -> Dict[str, UKBBDataset]:
     # Load data
     if not args.data_dir:
         args.data_dir = "../ukbb/"
@@ -190,12 +202,12 @@ def load_morphomnist_like(
 class MorphoMNIST(Dataset):
     def __init__(
         self,
-        root_dir,
-        train=True,
-        transform=None,
-        columns=None,
-        norm=None,
-        concat_pa=True,
+        root_dir: str,
+        train: bool = True,
+        transform: Optional[torchvision.transforms.Compose] = None,
+        columns: Optional[List[str]] = None,
+        norm: Optional[str] = None,
+        concat_pa: bool = True,
     ):
         self.train = train
         self.transform = transform
@@ -242,7 +254,7 @@ class MorphoMNIST(Dataset):
     def __len__(self):
         return len(self.images)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> Dict[str, Tensor]:
         sample = {}
         sample["x"] = self.images[idx]
 
@@ -262,7 +274,7 @@ class MorphoMNIST(Dataset):
         return sample
 
 
-def morphomnist(args):
+def morphomnist(args: Hparams) -> Dict[str, MorphoMNIST]:
     # Load data
     if not args.data_dir:
         args.data_dir = "../morphomnist/"
@@ -290,12 +302,18 @@ def morphomnist(args):
             norm=args.context_norm,
             concat_pa=args.concat_pa,
         )
-
     return datasets
 
 
 class ColourMNIST(Dataset):
-    def __init__(self, root, train=True, transform=None, concat_pa=True, corrupt_p=0):
+    def __init__(
+        self,
+        root: str,
+        train: bool = True,
+        transform: Optional[torchvision.transforms.Compose] = None,
+        concat_pa: bool = True,
+        corrupt_p: float = 0,
+    ):
         self.transform = transform
         self.concat_pa = concat_pa
         root = os.path.join(root, "train") if train else os.path.join(root, "test")
@@ -329,7 +347,7 @@ class ColourMNIST(Dataset):
     def __len__(self):
         return len(self.images)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> Dict[str, Tensor]:
         sample = {}
         sample["x"] = self.images[idx]
 
@@ -338,16 +356,12 @@ class ColourMNIST(Dataset):
 
         if self.concat_pa:
             sample["pa"] = torch.cat([v[idx] for _, v in self.samples.items()], dim=0)
-            # sample['pa'] = torch.cat([
-            #     F.one_hot(torch.tensor(self.parents['digit'][idx]), num_classes=10),
-            #     F.one_hot(torch.tensor(self.parents['colour'][idx]), num_classes=10)
-            # ], dim=0)
         else:
             sample.update({k: v[idx] for k, v in self.samples.items()})
         return sample
 
 
-def cmnist(args):
+def cmnist(args: Hparams) -> Dict[str, ColourMNIST]:
     if not args.data_dir:
         args.data_dir = "../mnist_digit_colour"
 
@@ -373,4 +387,146 @@ def cmnist(args):
             concat_pa=args.concat_pa,
         )
 
+    return datasets
+
+
+class MIMICMetadata(TypedDict):
+    age: float  # age in years
+    sex: int  # 0 -> male , 1 -> female
+    race: int  # 0 -> white , 1 -> asian , 2 -> black
+
+
+def read_mimic_from_df(
+    idx: int, df: pd.DataFrame, data_dir: str
+) -> Tuple[Image.Image, torch.Tensor, MIMICMetadata]:
+    """Get a single data point from the MIMIC-CXR dataframe.
+
+    References:
+    Written by Charles Jones.
+    https://github.com/biomedia-mira/chexploration/blob/main/notebooks/mimic.sample.ipynb
+
+    Args:
+        idx (int): Index of the data point to retrieve.
+        df (pd.DataFrame): Dataframe containing the MIMIC-CXR data.
+        data_dir (str): Path to the directory containing the preprocessed data.
+
+    Returns:
+        Tuple[torch.Tensor, torch.Tensor]: Tuple containing the image and binary label.
+            label 0 represents no finding, 1 represents pleural effusion.
+    """
+    img_path = os.path.join(data_dir, df.iloc[idx]["path_preproc"])
+    img = Image.open(img_path)  # .convert("RGB")
+    if df.iloc[idx]["disease"] == "Pleural Effusion":
+        label = torch.tensor(1)
+    elif df.iloc[idx]["disease"] == "No Finding":
+        label = torch.tensor(0)
+    else:
+        raise ValueError(
+            f"Invalid label {df.iloc[idx]['disease']}.",
+            "We expect either 'pleural_effusion' or 'no_finding'.",
+        )
+
+    age = df.iloc[idx]["age"]
+    sex = df.iloc[idx]["sex_label"]
+    race = df.iloc[idx]["race_label"]
+
+    meta = MIMICMetadata(age=age, sex=sex, race=race)
+    return img, label, meta
+
+
+class MIMIC(Dataset):
+    def __init__(
+        self,
+        split_path,
+        data_dir,
+        cache=False,
+        transform=None,
+        parents_x=None,
+        concat_pa=False,
+    ):
+        super().__init__()
+        self.concat_pa = concat_pa
+        self.parents_x = parents_x
+        split_df = pd.read_csv(split_path)
+        # remove rows whose disease label is neither No Finding nor Pleural Effusion
+        self.split_df = split_df[
+            (split_df["disease"] == "No Finding")
+            | (split_df["disease"] == "Pleural Effusion")
+        ].reset_index(drop=True)
+
+        self.data_dir = data_dir
+        self.cache = cache
+        self.transform = transform
+
+        if self.cache:
+            self.imgs = []
+            self.labels = []
+            self.meta = []
+            for idx, _ in tqdm(
+                self.split_df.iterrows(), total=len(self.split_df), desc="Caching MIMIC"
+            ):
+                assert isinstance(idx, int)
+                img, label, meta = read_mimic_from_df(idx, self.split_df, self.data_dir)
+                self.imgs.append(img)
+                self.labels.append(label)
+                self.meta.append(meta)
+
+    def __len__(self):
+        return len(self.split_df)
+
+    def __getitem__(self, idx: int) -> Dict[str, Tensor]:
+        if self.cache:
+            img = self.imgs[idx]
+            label = self.labels[idx]
+            meta = self.meta[idx]
+        else:
+            img, label, meta = read_mimic_from_df(idx, self.split_df, self.data_dir)
+        sample = {}
+        sample["x"] = self.transform(img)
+        sample["finding"] = label
+        sample.update(meta)
+        sample = preprocess_mimic(sample)
+        if self.concat_pa:
+            sample["pa"] = torch.cat(
+                [sample[k] for k in self.parents_x],
+                dim=0,
+            )
+        return sample
+
+
+def preprocess_mimic(sample: Dict[str, Tensor]) -> Dict[str, Tensor]:
+    for k, v in sample.items():
+        if k != "x":
+            sample[k] = torch.tensor([v])
+            if k == "race":
+                sample[k] = F.one_hot(sample[k], num_classes=3).squeeze()
+            elif k == "age":
+                sample[k] = sample[k] / 100 * 2 - 1  # [-1,1]
+    return sample
+
+
+def mimic(
+    args: Hparams,
+    augmentation: Optional[Dict[str, torchvision.transforms.Compose]] = None,
+) -> Dict[str, MIMIC]:
+    if augmentation is None:
+        augmentation = {}
+        augmentation["train"] = TF.Compose(
+            [
+                TF.Resize((args.input_res, args.input_res), antialias=None),
+                TF.PILToTensor(),
+            ]
+        )
+        augmentation["eval"] = augmentation["train"]
+
+    datasets = {}
+    for split in ["train", "valid", "test"]:
+        datasets[split] = MIMIC(
+            data_dir=os.path.join(args.data_dir, "data"),
+            split_path=os.path.join(args.data_dir, "meta", f"{split}.csv"),
+            cache=False,
+            parents_x=args.parents_x,  # ["age", "race", "sex", "finding"],
+            concat_pa=(True if not hasattr(args, "concat_pa") else args.concat_pa),
+            transform=augmentation[("eval" if split != "train" else split)],
+        )
     return datasets

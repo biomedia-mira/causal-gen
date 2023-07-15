@@ -1,3 +1,4 @@
+from typing import Dict, Optional, Any
 import os
 import torch
 import numpy as np
@@ -6,6 +7,13 @@ import seaborn as sns
 
 import matplotlib.pyplot as plt
 from matplotlib import colors
+from torch import nn, Tensor
+
+from layers import TraceStorage_ELBO
+import sys
+
+sys.path.append("..")
+from hps import Hparams
 
 # plt.rcParams['figure.facecolor'] = 'white'
 
@@ -21,7 +29,7 @@ class MidpointNormalize(colors.Normalize):
         return np.ma.masked_array(np.interp(value, x, y))
 
 
-def check_nan(input_dict):
+def check_nan(input_dict: Dict[str, Tensor]):
     nans = 0
     for k, v in input_dict.items():
         k_nans = torch.isnan(v).sum()
@@ -31,7 +39,7 @@ def check_nan(input_dict):
     return nans
 
 
-def update_stats(stats, elbo_fn):
+def update_stats(stats: Dict[str, Any], elbo_fn: TraceStorage_ELBO):
     """Accumulate tracked summary statistics."""
 
     def _update(trace, dist="p"):
@@ -48,7 +56,9 @@ def update_stats(stats, elbo_fn):
     return stats
 
 
-def plot_joint(args, model, dataset, step):
+def plot_joint(
+    args: Hparams, model: nn.Module, dataset: torch.utils.data.Dataset, step: int
+):
     plt.close("all")
     if "ukbb" in args.dataset:
         NotImplementedError
@@ -157,7 +167,15 @@ def plot(
 
 
 @torch.no_grad()
-def plot_cf(x, cf_x, pa, cf_pa, do, var_cf_x=None, num_images=8):
+def plot_cf(
+    x: Tensor,
+    cf_x: Tensor,
+    pa: Dict[str, Tensor],
+    cf_pa: Dict[str, Tensor],
+    do: Dict[str, Tensor],
+    var_cf_x: Optional[Tensor],
+    num_images: int = 8,
+):
     n = num_images  # 8 columns
     x = (x[:n].detach().cpu() + 1) * 127.5
     cf_x = (cf_x[:n].detach().cpu() + 1) * 127.5

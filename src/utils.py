@@ -1,3 +1,5 @@
+from typing import Dict, List, Optional
+
 import os
 import copy
 import imageio
@@ -5,6 +7,9 @@ import random
 import numpy as np
 import torch
 import torch.nn as nn
+from torch import nn, Tensor
+
+from hps import Hparams
 
 
 def seed_all(seed, deterministic=True):
@@ -223,18 +228,33 @@ class EMA(nn.Module):
         return self.ema_model(*args, **kwargs)
 
 
-def write_images(args, model, batch):
+def write_images(args: Hparams, model: nn.Module, batch: Dict[str, Tensor]):
     bs, c, h, w = batch["x"].shape
     # original imgs, channels last, [0,255]
     orig = (batch["x"].permute(0, 2, 3, 1) + 1.0) * 127.5
     orig = orig.detach().cpu().numpy().astype(np.uint8)
     viz_images = [orig]
 
-    def postprocess(x):
+    def postprocess(x: Tensor):
         x = (x.permute(0, 2, 3, 1) + 1.0) * 127.5  # channels last, [0,255]
         return x.detach().cpu().numpy()
 
-    def counterfactuals(model, z, pa, cf_pa, x=None, alpha=None, t=None):
+    def counterfactuals(
+        model: nn.Module,
+        z: List[Tensor],
+        pa: Dict[str, Tensor],
+        cf_pa: Dict[str, Tensor],
+        x: Optional[Tensor] = None,
+        alpha: Optional[float] = None,
+        t: Optional[float] = None,
+    ):
+        """ Note that this function is only used here for visualizing/debugging x's 
+        mechanism throughout training and does not infer x's (observation space) exogenous
+        noise term "u". For a complete and succinct example of counterfactual inference 
+        you may refer to our demo:
+         https://huggingface.co/spaces/mira-causality/counterfactuals/blob/main/app.py
+         (specifically the counterfactual_inference() function).
+        """
         # x = g(pa, z)
         x_rec, _ = model.forward_latents(latents=z, parents=pa, t=t)
         x_rec = postprocess(x_rec)

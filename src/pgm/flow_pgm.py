@@ -1,16 +1,24 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+from typing import Dict
 
+import numpy as np
+import torch
+import torch.nn.functional as F
+from torch import nn, Tensor
 import pyro
 import pyro.distributions as dist
 import pyro.distributions.transforms as T
-
 from pyro.nn import DenseNN
 from pyro.infer.reparam.transform import TransformReparam
 from pyro.distributions.conditional import ConditionalTransformedDistribution
 
-from layers import ConditionalAffineTransform, MLP, CNN
+from layers import (
+    MLP, CNN,  # fmt: skip
+    ConditionalGumbelMax,
+    ConditionalAffineTransform,
+    ConditionalTransformedDistributionGumbelMax,
+)
+
+from hps import Hparams
 
 
 class BasePGM(nn.Module):
@@ -26,17 +34,17 @@ class BasePGM(nn.Module):
 
         return pyro.poutine.reparam(self.model, config=config)(*args, **kwargs)
 
-    def sample_scm(self, n_samples=1, t=None):
+    def sample_scm(self, n_samples: int = 1):
         with pyro.plate("obs", n_samples):
-            samples = self.scm(t)
+            samples = self.scm()
         return samples
 
-    def sample(self, n_samples=1, t=None):
+    def sample(self, n_samples: int = 1):
         with pyro.plate("obs", n_samples):
-            samples = self.model(t)  # model defined in parent class
+            samples = self.model()  # NOTE: not ideal as model is defined in child class
         return samples
 
-    def infer_exogeneous(self, obs):
+    def infer_exogeneous(self, obs: Dict[str, Tensor]) -> Dict[str, Tensor]:
         batch_size = list(obs.values())[0].shape[0]
         # assuming that we use transformed distributions for everything:
         cond_model = pyro.condition(self.sample, data=obs)
@@ -56,7 +64,14 @@ class BasePGM(nn.Module):
                 )
         return output
 
-    def counterfactual(self, obs, intervention, num_particles=1, detach=True, t=None):
+    def counterfactual(
+        self,
+        obs: Dict[str, Tensor],
+        intervention: Dict[str, Tensor],
+        num_particles: int = 1,
+        detach: bool = True,
+    ) -> Dict[str, Tensor]:
+        # NOTE: not ideal as "variables" is defined in child class
         dag_variables = self.variables.keys()
         assert set(obs.keys()) == set(dag_variables)
         avg_cfs = {k: torch.zeros_like(obs[k]) for k in obs.keys()}
@@ -76,7 +91,17 @@ class BasePGM(nn.Module):
             # Action
             counterfactual_scm = pyro.poutine.do(abducted_scm, data=intervention)
             # Prediction
-            counterfactuals = counterfactual_scm(batch_size, t)
+            counterfactuals = counterfactual_scm(batch_size)
+
+            if hasattr(self, "discrete_variables"):  # hack for MIMIC
+                # Check if we should change "finding", i.e. if its parents and/or
+                # itself are not intervened on, then we use its observed value.
+                # This is used due to stochastic abduction of discrete variables
+                if (
+                    "age" not in intervention.keys()
+                    and "finding" not in intervention.keys()
+                ):
+                    counterfactuals["finding"] = obs["finding"]
 
             for k, v in counterfactuals.items():
                 avg_cfs[k] += v / num_particles
@@ -84,7 +109,7 @@ class BasePGM(nn.Module):
 
 
 class FlowPGM(BasePGM):
-    def __init__(self, args):
+    def __init__(self, args: Hparams):
         super().__init__()
         self.variables = {
             "sex": "binary",
@@ -142,7 +167,7 @@ class FlowPGM(BasePGM):
             else F.softplus(x)
         )
 
-    def model(self, t=None):
+    def model(self) -> Dict[str, Tensor]:
         # p(s), sex dist
         ps = dist.Bernoulli(logits=self.s_logit).to_event(1)
         sex = pyro.sample("sex", ps)
@@ -180,7 +205,7 @@ class FlowPGM(BasePGM):
             "ventricle_volume": vvol,
         }
 
-    def guide(self, **obs):
+    def guide(self, **obs) -> None:
         # guide for (optional) semi-supervised learning
         pyro.module("FlowPGM", self)
         with pyro.plate("observations", obs["x"].shape[0]):
@@ -216,7 +241,7 @@ class FlowPGM(BasePGM):
                 a_loc, a_logscale = self.encoder_a(ctx).chunk(2, dim=-1)
                 pyro.sample("age", dist.Normal(a_loc, self.f(a_logscale)).to_event(1))
 
-    def model_anticausal(self, **obs):
+    def model_anticausal(self, **obs) -> None:
         # assumes all variables are observed
         pyro.module("FlowPGM", self)
         with pyro.plate("observations", obs["x"].shape[0]):
@@ -251,7 +276,7 @@ class FlowPGM(BasePGM):
             qm_x = dist.Bernoulli(probs=m_prob).to_event(1)
             pyro.sample("mri_seq_aux", qm_x, obs=obs["mri_seq"])
 
-    def predict(self, **obs):
+    def predict(self, **obs) -> Dict[str, Tensor]:
         # q(v | x)
         v_loc, v_logscale = self.encoder_v(obs["x"]).chunk(2, dim=-1)
         # v_loc = torch.tanh(v_loc)
@@ -277,11 +302,11 @@ class FlowPGM(BasePGM):
             "ventricle_volume": v_loc,
         }
 
-    def svi_model(self, **obs):
+    def svi_model(self, **obs) -> None:
         with pyro.plate("observations", obs["x"].shape[0]):
             pyro.condition(self.model, data=obs)()
 
-    def guide_pass(self, **obs):
+    def guide_pass(self, **obs) -> None:
         pass
 
 
@@ -334,12 +359,12 @@ class MorphoMNISTPGM(BasePGM):
                 else F.softplus(x)
             )
 
-    def model(self, t=None):
+    def model(self) -> Dict[str, Tensor]:
         pyro.module("MorphoMNISTPGM", self)
         # p(y), digit label prior dist
         py = dist.OneHotCategorical(
             probs=F.softmax(self.digit_logits, dim=-1)
-        ).to_event(1)
+        )  # .to_event(1)
         # with pyro.poutine.scale(scale=0.05):
         digit = pyro.sample("digit", py)
 
@@ -358,7 +383,7 @@ class MorphoMNISTPGM(BasePGM):
 
         return {"thickness": thickness, "intensity": intensity, "digit": digit}
 
-    def guide(self, **obs):
+    def guide(self, **obs) -> None:
         # guide for (optional) semi-supervised learning
         with pyro.plate("observations", obs["x"].shape[0]):
             # q(i | x)
@@ -378,10 +403,10 @@ class MorphoMNISTPGM(BasePGM):
             # q(y | x)
             if obs["digit"] is None:
                 y_prob = F.softmax(self.encoder_y(obs["x"]), dim=-1)
-                qy_x = dist.OneHotCategorical(probs=y_prob).to_event(1)
+                qy_x = dist.OneHotCategorical(probs=y_prob)  # .to_event(1)
                 pyro.sample("digit", qy_x)
 
-    def model_anticausal(self, **obs):
+    def model_anticausal(self, **obs) -> None:
         # assumes all variables are observed & continuous ones are in [-1,1]
         pyro.module("MorphoMNISTPGM", self)
         with pyro.plate("observations", obs["x"].shape[0]):
@@ -399,10 +424,10 @@ class MorphoMNISTPGM(BasePGM):
 
             # q(y | x)
             y_prob = F.softmax(self.encoder_y(obs["x"]), dim=-1)
-            qy_x = dist.OneHotCategorical(probs=y_prob).to_event(1)
+            qy_x = dist.OneHotCategorical(probs=y_prob)  # .to_event(1)
             pyro.sample("digit_aux", qy_x, obs=obs["digit"])
 
-    def predict(self, **obs):
+    def predict(self, **obs) -> Dict[str, Tensor]:
         # q(t | x, i)
         t_loc, t_logscale = self.encoder_t(obs["x"], y=obs["intensity"]).chunk(
             2, dim=-1
@@ -415,11 +440,11 @@ class MorphoMNISTPGM(BasePGM):
         y_prob = F.softmax(self.encoder_y(obs["x"]), dim=-1)
         return {"thickness": t_loc, "intensity": i_loc, "digit": y_prob}
 
-    def svi_model(self, **obs):
+    def svi_model(self, **obs) -> None:
         with pyro.plate("observations", obs["x"].shape[0]):
             pyro.condition(self.model, data=obs)()
 
-    def guide_pass(self, **obs):
+    def guide_pass(self, **obs) -> None:
         pass
 
 
@@ -446,60 +471,240 @@ class ColourMNISTPGM(BasePGM):
                 else F.softplus(x)
             )
 
-    def model(self, t=None):
+    def model(self) -> Dict[str, Tensor]:
         pyro.module("ColourMNISTPGM", self)
         # p(y), digit label prior dist
         py = dist.OneHotCategorical(
             probs=F.softmax(self.digit_logits, dim=-1)
-        ).to_event(1)
+        )  # .to_event(1)
         digit = pyro.sample("digit", py)
 
         # p(c), colour label prior dist
         pc = dist.OneHotCategorical(
             probs=F.softmax(self.colour_logits, dim=-1)
-        ).to_event(1)
+        )  # .to_event(1)
         colour = pyro.sample("colour", pc)
         return {"digit": digit, "colour": colour}
 
-    def guide(self, **obs):
+    def guide(self, **obs) -> None:
         # guide for (optional) semi-supervised learning
         with pyro.plate("observations", obs["x"].shape[0]):
             # q(y | x)
             if obs["digit"] is None:
                 y_prob = F.softmax(self.encoder_y(obs["x"]), dim=-1)
-                qy_x = dist.OneHotCategorical(probs=y_prob).to_event(1)
+                qy_x = dist.OneHotCategorical(probs=y_prob)  # .to_event(1)
                 pyro.sample("digit", qy_x)
 
             # q(y | x)
             if obs["colour"] is None:
                 c_prob = F.softmax(self.encoder_c(obs["x"]), dim=-1)
-                qc_x = dist.OneHotCategorical(probs=c_prob).to_event(1)
+                qc_x = dist.OneHotCategorical(probs=c_prob)  # .to_event(1)
                 pyro.sample("colour", qc_x)
 
-    def model_anticausal(self, **obs):
+    def model_anticausal(self, **obs) -> None:
         # assumes all variables are observed
         pyro.module("ColourMNISTPGM", self)
         with pyro.plate("observations", obs["x"].shape[0]):
             # q(y | x)
             y_prob = F.softmax(self.encoder_y(obs["x"]), dim=-1)
-            qy_x = dist.OneHotCategorical(probs=y_prob).to_event(1)
+            qy_x = dist.OneHotCategorical(probs=y_prob)  # .to_event(1)
             pyro.sample("digit_aux", qy_x, obs=obs["digit"])
 
             # q(c | x)
             c_prob = F.softmax(self.encoder_c(obs["x"]), dim=-1)
-            qc_x = dist.OneHotCategorical(probs=c_prob).to_event(1)
+            qc_x = dist.OneHotCategorical(probs=c_prob)  # .to_event(1)
             pyro.sample("colour_aux", qc_x, obs=obs["colour"])
 
-    def predict(self, **obs):
+    def predict(self, **obs) -> Dict[str, Tensor]:
         # q(y | x)
         y_prob = F.softmax(self.encoder_y(obs["x"]), dim=-1)
         # q(c | x)
         c_prob = F.softmax(self.encoder_c(obs["x"]), dim=-1)
         return {"digit": y_prob, "colour": c_prob}
 
-    def svi_model(self, **obs):
+    def svi_model(self, **obs) -> None:
         with pyro.plate("observations", obs["x"].shape[0]):
             pyro.condition(self.model, data=obs)()
 
-    def guide_pass(self, **obs):
+    def guide_pass(self, **obs) -> None:
+        pass
+
+
+class ChestPGM(BasePGM):
+    def __init__(self, args: Hparams):
+        super().__init__()
+        self.variables = {
+            "race": "categorical",
+            "sex": "binary",
+            "finding": "binary",
+            "age": "continuous",
+        }
+        # Discrete variables that are not root nodes
+        self.discrete_variables = {"finding": "binary"}
+        # define base distributions
+        for k in ["a", "f"]:
+            self.register_buffer(f"{k}_base_loc", torch.zeros(1))
+            self.register_buffer(f"{k}_base_scale", torch.ones(1))
+        # age spline flow
+        self.age_flow_components = T.ComposeTransformModule([T.Spline(1)])
+        # self.age_constraints = T.ComposeTransform([
+        #     T.AffineTransform(loc=4.09541458484, scale=0.32548387126),
+        #     T.ExpTransform()])
+        self.age_flow = T.ComposeTransform(
+            [
+                self.age_flow_components,
+                # self.age_constraints,
+            ]
+        )
+        # Finding (conditional) via MLP, a -> f
+        finding_net = DenseNN(1, [8, 16], param_dims=[2], nonlinearity=nn.Sigmoid())
+        self.finding_transform_GumbelMax = ConditionalGumbelMax(
+            context_nn=finding_net, event_dim=0
+        )
+        # log space for sex and race
+        self.sex_logit = nn.Parameter(np.log(1 / 2) * torch.ones(1))
+        self.race_logits = nn.Parameter(np.log(1 / 3) * torch.ones(1, 3))
+
+        if args.setup != "sup_pgm":
+            from resnet import ResNet, ResNet18, CustomBlock
+
+            shared_model = ResNet(
+                CustomBlock,
+                layers=[2, 2, 2, 2],
+                widths=[64, 128, 256, 512],
+                norm_layer=lambda c: nn.GroupNorm(min(32, c // 4), c),
+            )
+            # shared_model = torchvision.models.resnet18(weights=None)
+            shared_model.conv1 = nn.Conv2d(
+                args.input_channels,
+                64,
+                kernel_size=7,
+                stride=2,
+                padding=3,
+                bias=False,
+            )
+            kwargs = {
+                "in_shape": (args.input_channels, *(args.input_res,) * 2),
+                "base_model": shared_model,
+            }
+            # q(s | x) ~ Bernoulli(f(x))
+            self.encoder_s = ResNet18(num_outputs=1, **kwargs)
+            # q(r | x) ~ OneHotCategorical(f(x))
+            self.encoder_r = ResNet18(num_outputs=3, **kwargs)
+            # q(f | x) ~ Bernoulli(f(x))
+            self.encoder_f = ResNet18(num_outputs=1, **kwargs)
+            # q(a | x, f) ~ Normal(mu(x), sigma(x))
+            self.encoder_a = ResNet18(num_outputs=2, context_dim=1, **kwargs)
+            self.f = (
+                lambda x: args.std_fixed * torch.ones_like(x)
+                if args.std_fixed > 0
+                else F.softplus(x)
+            )
+
+    def model(self) -> Dict[str, Tensor]:
+        pyro.module("ChestPGM", self)
+        # p(s), sex dist
+        ps = dist.Bernoulli(logits=self.sex_logit).to_event(1)
+        sex = pyro.sample("sex", ps)
+
+        # p(a), age flow
+        pa_base = dist.Normal(self.a_base_loc, self.a_base_scale).to_event(1)
+        pa = dist.TransformedDistribution(pa_base, self.age_flow)
+        age = pyro.sample("age", pa)
+        # age_ = self.age_constraints.inv(age)
+        _ = self.age_flow_components  # register with pyro
+
+        # p(r), race dist
+        pr = dist.OneHotCategorical(logits=self.race_logits)  # .to_event(1)
+        race = pyro.sample("race", pr)
+
+        # p(f | a), finding as OneHotCategorical conditioned on age
+        finding_dist_base = dist.Gumbel(self.f_base_loc, self.f_base_scale).to_event(1)
+        finding_dist = ConditionalTransformedDistributionGumbelMax(
+            finding_dist_base, [self.finding_transform_GumbelMax]
+        ).condition(age)
+        finding = pyro.sample("finding", finding_dist)
+
+        return {
+            "sex": sex,
+            "race": race,
+            "age": age,
+            "finding": finding,
+        }
+
+    def guide(self, **obs) -> None:
+        with pyro.plate("observations", obs["x"].shape[0]):
+            # q(s | x)
+            if obs["sex"] is None:
+                s_prob = torch.sigmoid(self.encoder_s(obs["x"]))
+                pyro.sample("sex", dist.Bernoulli(probs=s_prob).to_event(1))
+            # q(r | x)
+            if obs["race"] is None:
+                r_probs = F.softmax(self.encoder_r(obs["x"]), dim=-1)
+                qr_x = dist.OneHotCategorical(probs=r_probs)  # .to_event(1)
+                pyro.sample("race", qr_x)
+            # q(f | x)
+            if obs["finding"] is None:
+                f_prob = torch.sigmoid(self.encoder_f(obs["x"]))
+                qf_x = dist.Bernoulli(probs=f_prob).to_event(1)
+                obs["finding"] = pyro.sample("finding", qf_x)
+            # q(a | x, f)
+            if obs["age"] is None:
+                a_loc, a_logscale = self.encoder_a(obs["x"], y=obs["finding"]).chunk(
+                    2, dim=-1
+                )
+                qa_xf = dist.Normal(a_loc, self.f(a_logscale)).to_event(1)
+                pyro.sample("age_aux", qa_xf)
+
+    def model_anticausal(self, **obs) -> None:
+        # assumes all variables are observed, train classfiers
+        pyro.module("ChestPGM", self)
+        with pyro.plate("observations", obs["x"].shape[0]):
+            # q(s | x)
+            s_prob = torch.sigmoid(self.encoder_s(obs["x"]))
+            qs_x = dist.Bernoulli(probs=s_prob).to_event(1)
+            # with pyro.poutine.scale(scale=0.8):
+            pyro.sample("sex_aux", qs_x, obs=obs["sex"])
+
+            # q(r | x)
+            r_probs = F.softmax(self.encoder_r(obs["x"]), dim=-1)
+            qr_x = dist.OneHotCategorical(probs=r_probs)  # .to_event(1)
+            # with pyro.poutine.scale(scale=0.5):
+            pyro.sample("race_aux", qr_x, obs=obs["race"])
+
+            # q(f | x)
+            f_prob = torch.sigmoid(self.encoder_f(obs["x"]))
+            qf_x = dist.Bernoulli(probs=f_prob).to_event(1)
+            pyro.sample("finding_aux", qf_x, obs=obs["finding"])
+
+            # q(a | x, f)
+            a_loc, a_logscale = self.encoder_a(obs["x"], y=obs["finding"]).chunk(
+                2, dim=-1
+            )
+            qa_xf = dist.Normal(a_loc, self.f(a_logscale)).to_event(1)
+            # with pyro.poutine.scale(scale=2):
+            pyro.sample("age_aux", qa_xf, obs=obs["age"])
+
+    def predict(self, **obs) -> Dict[str, Tensor]:
+        # q(s | x)
+        s_prob = torch.sigmoid(self.encoder_s(obs["x"]))
+        # q(r | x)
+        r_probs = F.softmax(self.encoder_r(obs["x"]), dim=-1)
+        # q(f | x)
+        f_prob = torch.sigmoid(self.encoder_f(obs["x"]))
+        # q(a | x, f)
+        a_loc, _ = self.encoder_a(obs["x"], y=obs["finding"]).chunk(2, dim=-1)
+
+        return {
+            "sex": s_prob,
+            "race": r_probs,
+            "finding": f_prob,
+            "age": a_loc,
+        }
+
+    def svi_model(self, **obs) -> None:
+        with pyro.plate("observations", obs["x"].shape[0]):
+            pyro.condition(self.model, data=obs)()
+
+    def guide_pass(self, **obs) -> None:
         pass

@@ -1,15 +1,22 @@
 import sys
-import torch
-import torch.nn as nn
-
-from utils_pgm import check_nan
-from datasets import get_attr_max_min
 
 sys.path.append("..")
+from typing import Dict
+
+import torch
+from torch import nn, Tensor
+
+from layers import TraceStorage_ELBO
+from utils_pgm import check_nan
+
+from hps import Hparams
+from datasets import get_attr_max_min
 
 
 class DSCM(nn.Module):
-    def __init__(self, args, pgm, predictor, vae):
+    def __init__(
+        self, args: Hparams, pgm: nn.Module, predictor: nn.Module, vae: nn.Module
+    ):
         super().__init__()
         self.args = args
         self.pgm = pgm  # DAG model excluding x
@@ -21,7 +28,14 @@ class DSCM(nn.Module):
         self.lmbda = nn.Parameter(args.lmbda_init * torch.ones(1))
         self.register_buffer("eps", args.elbo_constraint * torch.ones(1))
 
-    def forward(self, obs, do, elbo_fn, cf_particles=1, t_abduct=1.0):
+    def forward(
+        self,
+        obs: Dict[str, Tensor],
+        do: Dict[str, Tensor],
+        elbo_fn: TraceStorage_ELBO,
+        cf_particles: int = 1,
+        t_abduct: float = 1.0,
+    ) -> Dict[str, Tensor]:
         pa = {k: v for k, v in obs.items() if k != "x"}
         # forward vae with factual parents
         _pa = vae_preprocess(self.args, {k: v.clone() for k, v in pa.items()})
@@ -82,31 +96,49 @@ class DSCM(nn.Module):
         return out
 
 
-def vae_preprocess(args, pa):
+def ukbb_preprocess(pa: Dict[str, Tensor]) -> Dict[str, Tensor]:
+    """hack for preprocessing ukbb parents for the vae which was originally trained using
+    log-standardized parents, whereas the pgm was trained using [-1,1] normalization"""
+
+    # first undo [-1,1] parent preprocessing back to original range
+    for k, v in pa.items():
+        if k != "mri_seq" and k != "sex":
+            pa[k] = (v + 1) / 2  # [-1,1] -> [0,1]
+            _max, _min = get_attr_max_min(k)
+            pa[k] = pa[k] * (_max - _min) + _min
+
+    # log-standardize parents for vae input
+    for k, v in pa.items():
+        logpa_k = torch.log(v.clamp(min=1e-12))
+        if k == "age":
+            pa[k] = (logpa_k - 4.112339973449707) / 0.11769197136163712
+        elif k == "brain_volume":
+            pa[k] = (logpa_k - 13.965583801269531) / 0.09537758678197861
+        elif k == "ventricle_volume":
+            pa[k] = (logpa_k - 10.345998764038086) / 0.43127763271331787
+    return pa
+
+
+def vae_preprocess(args: Hparams, pa: Dict[str, Tensor]) -> Tensor:
     if "ukbb" in args.dataset:
-        # preprocessing ukbb parents for the vae which was originally trained using
-        # log standardized parents. The pgm was trained using [-1,1] normalization
-
-        # first undo [-1,1] parent preprocessing back to original range
-        for k, v in pa.items():
-            if k != "mri_seq" and k != "sex":
-                pa[k] = (v + 1) / 2  # [-1,1] -> [0,1]
-                _max, _min = get_attr_max_min(k)
-                pa[k] = pa[k] * (_max - _min) + _min
-
-        # log_standardize parents for vae input
-        for k, v in pa.items():
-            logpa_k = torch.log(v.clamp(min=1e-12))
-            if k == "age":
-                pa[k] = (logpa_k - 4.112339973449707) / 0.11769197136163712
-            elif k == "brain_volume":
-                pa[k] = (logpa_k - 13.965583801269531) / 0.09537758678197861
-            elif k == "ventricle_volume":
-                pa[k] = (logpa_k - 10.345998764038086) / 0.43127763271331787
-    # concatenate parents expand to input res for conditioning the vae
-    pa = torch.cat(
+        pa = ukbb_preprocess(pa)
+    # concatenate parents, expand to input res for conditioning the vae
+    concat_pa = torch.cat(
         [pa[k] if len(pa[k].shape) > 1 else pa[k][..., None] for k in args.parents_x],
         dim=1,
     )
-    pa = pa[..., None, None].repeat(1, 1, *(args.input_res,) * 2).cuda().float()
-    return pa
+    concat_pa = (
+        concat_pa[..., None, None].repeat(1, 1, *(args.input_res,) * 2).cuda().float()
+    )
+    return concat_pa
+
+
+if __name__ == "__main__":
+    # test
+    args = Hparams()
+    args.dataset = "none"
+    args.input_res = 28
+    args.parents_x = ["a", "b", "c"]
+    pa = {"a": torch.ones(2, 1), "b": torch.ones(2, 1), "c": torch.ones(2, 1)}
+    out = vae_preprocess(args, pa)
+    assert out.shape == (2, 3, 28, 28)

@@ -1,3 +1,5 @@
+import argparse
+
 HPARAMS_REGISTRY = {}
 
 
@@ -14,8 +16,8 @@ morphomnist.wd = 0.01
 morphomnist.z_dim = 16
 morphomnist.input_res = 32
 morphomnist.pad = 4
-morphomnist.enc_arch = "32b1d2,16b1d2,8b1d2,4b1d4,1b2"
-morphomnist.dec_arch = "1b2,4b2,8b2,16b2,32b2"
+morphomnist.enc_arch = "32b3d2,16b3d2,8b3d2,4b3d4,1b4"
+morphomnist.dec_arch = "1b4,4b4,8b4,16b4,32b4"
 morphomnist.widths = [16, 32, 64, 128, 256]
 morphomnist.parents_x = ["thickness", "intensity", "digit"]
 morphomnist.concat_pa = True
@@ -32,8 +34,8 @@ cmnist.z_dim = 16
 cmnist.input_res = 32
 cmnist.input_channels = 3
 cmnist.pad = 4
-cmnist.enc_arch = "32b1d2,16b1d2,8b1d2,4b1d4,1b2"
-cmnist.dec_arch = "1b2,4b2,8b2,16b2,32b2"
+cmnist.enc_arch = "32b3d2,16b3d2,8b3d2,4b3d4,1b4"
+cmnist.dec_arch = "1b4,4b4,8b4,16b4,32b4"
 cmnist.widths = [16, 32, 64, 128, 256]
 cmnist.parents_x = ["digit", "colour"]
 cmnist.context_dim = 20
@@ -63,7 +65,20 @@ ukbb192.widths = [32, 64, 96, 128, 160, 192, 512]
 HPARAMS_REGISTRY["ukbb192"] = ukbb192
 
 
-def setup_hparams(parser):
+mimic192 = Hparams()
+mimic192.lr = 1e-3
+mimic192.bs = 16
+mimic192.wd = 0.1
+mimic192.z_dim = 16
+mimic192.input_res = 192
+mimic192.pad = 9
+mimic192.enc_arch = "192b1d2,96b3d2,48b7d2,24b11d2,12b7d2,6b3d6,1b2"
+mimic192.dec_arch = "1b2,6b4,12b8,24b12,48b8,96b4,192b2"
+mimic192.widths = [32, 64, 96, 128, 160, 192, 512]
+HPARAMS_REGISTRY["mimic192"] = mimic192
+
+
+def setup_hparams(parser: argparse.ArgumentParser) -> Hparams:
     hparams = Hparams()
     args = parser.parse_known_args()[0]
     valid_args = set(args.__dict__.keys())
@@ -76,7 +91,7 @@ def setup_hparams(parser):
     return hparams
 
 
-def add_arguments(parser):
+def add_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--exp_name", help="Experiment name.", type=str, default="")
     parser.add_argument(
         "--data_dir", help="Data directory to load form.", type=str, default=""

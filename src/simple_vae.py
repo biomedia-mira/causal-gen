@@ -1,10 +1,13 @@
+from typing import Dict, Optional, Tuple, Union, Any, List
+
 import numpy as np
 import torch
-import torch.nn as nn
+from torch import nn, Tensor
 
 import torch.distributions as dist
 import torch.distributions.transforms as T
 
+from hps import Hparams
 
 EPS = -9
 EPS_z = -9
@@ -30,7 +33,7 @@ def sample_gaussian(loc, logscale):
 
 
 class Encoder(nn.Module):
-    def __init__(self, args):
+    def __init__(self, args: Hparams):
         super().__init__()
         n_channels = args.hidden_dim // 4
         self.conv = nn.Sequential(
@@ -54,7 +57,9 @@ class Encoder(nn.Module):
         self.z_loc = nn.Linear(args.hidden_dim, args.z_dim)
         self.z_logscale = nn.Linear(args.hidden_dim, args.z_dim)
 
-    def forward(self, x, y, t=None):
+    def forward(
+        self, x: Tensor, y: Tensor, t: Optional[float] = None
+    ) -> Tuple[Tensor, Tensor]:
         x = self.conv(x).reshape(x.size(0), -1)
         x = self.fc(x)
         if len(y.shape) > 2:
@@ -67,7 +72,7 @@ class Encoder(nn.Module):
 
 
 class CondPrior(nn.Module):
-    def __init__(self, args):
+    def __init__(self, args: Hparams):
         super().__init__()
         self.fc = nn.Sequential(
             nn.Linear(args.context_dim, args.hidden_dim),
@@ -84,7 +89,9 @@ class CondPrior(nn.Module):
         nn.init.zeros_(self.z_logscale.weight)
         nn.init.zeros_(self.z_logscale.bias)
 
-    def forward(self, y, t=None):
+    def forward(
+        self, y: Tensor, t: Optional[float] = None
+    ) -> Tuple[Tensor, Tensor, Tensor]:
         if len(y.shape) > 2:
             y = y[:, :, 0, 0]
         y = self.fc(y)
@@ -95,7 +102,7 @@ class CondPrior(nn.Module):
 
 
 class DGaussNet(nn.Module):
-    def __init__(self, args):
+    def __init__(self, args: Hparams):
         super(DGaussNet, self).__init__()
         self.x_loc = nn.Conv2d(
             args.widths[0], args.input_channels, kernel_size=1, stride=1
@@ -121,18 +128,18 @@ class DGaussNet(nn.Module):
             else:
                 NotImplementedError(f"{args.x_like} not implemented.")
 
-    def forward(self, h, t=None):
+    def forward(self, h: Tensor, t: Optional[float] = None) -> Tensor:
         loc, logscale = self.x_loc(h), self.x_logscale(h).clamp(min=EPS)
         if t is not None:
             logscale = logscale + torch.tensor(t).to(h.device).log()
         return loc, logscale
 
-    def approx_cdf(self, x):
+    def approx_cdf(self, x: Tensor) -> Tensor:
         return 0.5 * (
             1.0 + torch.tanh(np.sqrt(2.0 / np.pi) * (x + 0.044715 * torch.pow(x, 3)))
         )
 
-    def nll(self, h, x):
+    def nll(self, h: Tensor, x: Tensor) -> Tensor:
         loc, logscale = self.forward(h)
         centered_x = x - loc
         inv_stdv = torch.exp(-logscale)
@@ -152,7 +159,9 @@ class DGaussNet(nn.Module):
         )
         return -1.0 * log_probs.mean(dim=(1, 2, 3))
 
-    def sample(self, h, return_loc=True, t=None):
+    def sample(
+        self, h: Tensor, return_loc: bool = True, t: Optional[float] = None
+    ) -> Tuple[Tensor, Tensor]:
         if return_loc:
             x, logscale = self.forward(h)
         else:
@@ -163,7 +172,7 @@ class DGaussNet(nn.Module):
 
 
 class GaussNet(nn.Module):
-    def __init__(self, args):
+    def __init__(self, args: Hparams):
         super(GaussNet, self).__init__()
         self.x_loc = nn.Conv2d(
             args.widths[0], args.input_channels, kernel_size=1, stride=1
@@ -189,7 +198,9 @@ class GaussNet(nn.Module):
             else:
                 NotImplementedError(f"{args.x_like} not implemented.")
 
-    def forward(self, h, t=None):
+    def forward(
+        self, h: Tensor, t: Optional[float] = None
+    ) -> Union[Tensor, torch.distributions.Distribution]:
         loc, logscale = self.x_loc(h), self.x_logscale(h).clamp(min=EPS)
         if t is not None:
             logscale = logscale + torch.tensor(t).to(h.device).log()
@@ -200,7 +211,9 @@ class GaussNet(nn.Module):
         else:
             return dist.Independent(dist.Normal(loc, scale), 3)
 
-    def nll(self, h, x):
+    def nll(
+        self, h: Tensor, x: Tensor
+    ) -> Union[Tensor, torch.distributions.Distribution]:
         x_dist = self.forward(h)
         if isinstance(x_dist, torch.Tensor):  # when x_dist is just nans
             print("nan")
@@ -213,14 +226,16 @@ class GaussNet(nn.Module):
             # per pixel nll
             return -1.0 * x_dist.log_prob(x) / np.prod(x.shape[1:])
 
-    def sample(self, h, return_loc=True, t=None):
+    def sample(
+        self, h: Tensor, return_loc: bool = True, t: Optional[float] = None
+    ) -> Tuple[Tensor, Tensor]:
         x_dist = self.forward(h, t)
         x = x_dist.base_dist.loc if return_loc else x_dist.sample()
         x = self.x_preprocess().inv(x)  # (sigmoid(x) - alpha) / (1 - alpha) * 256
         x = torch.clamp((x - 128) / 128, min=-1.0, max=1.0)  # return in [-1,1]
         return x, x_dist.base_dist.scale
 
-    def x_preprocess(self):
+    def x_preprocess(self) -> torch.distributions.transforms.Transform:
         """(x + uniform_noise) pixel values are [0, 256]^D
         realnvp: model density of: logit(alpha + (1 - alpha) * x / 256)."""
         alpha, num_bits = 0.0, 8
@@ -234,7 +249,7 @@ class GaussNet(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, args):
+    def __init__(self, args: Hparams):
         super().__init__()
         self.cond_prior = args.cond_prior
         in_width = args.z_dim + args.context_dim
@@ -265,7 +280,7 @@ class Decoder(nn.Module):
             dec_act,
         )
 
-    def forward(self, y, z=None, t=None):
+    def forward(self, y: Tensor, z: Optional[Tensor] = None, t: Optional[float] = None):
         if len(y.shape) > 2:
             y = y[:, :, 0, 0]
 
@@ -296,9 +311,7 @@ class Decoder(nn.Module):
         x = self.fc(x).reshape(x.size(0), -1, 4, 4)
         return self.conv(x), (p_loc, p_logscale)
 
-    def drop_cond(self, p=0.5):
-        # p1, p2 = 0, 0
-        # p1 = dist.Bernoulli(p).sample()
+    def drop_cond(self) -> Tuple[int, int]:
         opt = dist.Categorical(1 / 3 * torch.ones(3)).sample()
         if opt == 0:
             p1, p2 = 0, 1
@@ -310,7 +323,7 @@ class Decoder(nn.Module):
 
 
 class VAE(nn.Module):
-    def __init__(self, args):
+    def __init__(self, args: Hparams):
         super().__init__()
         args.hidden_dim = 128
         self.cond_prior = args.cond_prior
@@ -328,7 +341,7 @@ class VAE(nn.Module):
         else:
             NotImplementedError(f"{args.x_like} not implemented.")
 
-    def forward(self, x, parents, beta=1):
+    def forward(self, x: Tensor, parents: Tensor, beta: int = 1) -> Dict[str, Tensor]:
         q_loc, q_logscale = self.encoder(x, y=parents)
         z = sample_gaussian(q_loc, q_logscale)
         h, prior = self.decoder(y=parents, z=z)
@@ -339,11 +352,20 @@ class VAE(nn.Module):
         elbo = nll_pp.mean() + beta * kl_pp.mean()  # negative elbo (free energy)
         return dict(elbo=elbo, nll=nll_pp.mean(), kl=kl_pp.mean())
 
-    def sample(self, parents, return_loc=True, t=None):
+    def sample(
+        self, parents: Tensor, return_loc: bool = True, t: Optional[float] = None
+    ):
         h, _ = self.decoder(y=parents, t=t)
         return self.likelihood.sample(h, return_loc, t=t)
 
-    def abduct(self, x, parents, cf_parents=None, alpha=0.5, t=None):
+    def abduct(
+        self,
+        x: Tensor,
+        parents: Tensor,
+        cf_parents: Optional[Tensor] = None,
+        alpha: float = 0.5,
+        t: Optional[float] = None,
+    ) -> List[Tensor]:
         q_loc, q_logscale = self.encoder(x, y=parents)  # q(z|x,pa)
         z = sample_gaussian(q_loc, q_logscale)
 
@@ -383,6 +405,12 @@ class VAE(nn.Module):
         else:  # z if exogenous prior
             return [z.detach()]
 
-    def forward_latents(self, latents, parents, return_loc=True, t=None):
+    def forward_latents(
+        self,
+        latents: List[Tensor],
+        parents: Tensor,
+        return_loc: bool = True,
+        t: Optional[float] = None,
+    ):
         h, _ = self.decoder(y=parents, z=latents[0], t=t)
         return self.likelihood.sample(h, return_loc, t=t)

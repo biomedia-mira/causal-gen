@@ -1,14 +1,22 @@
+from typing import Dict, List, Optional, Tuple
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributions as dist
+from torch import nn, Tensor
+
+from hps import Hparams
 
 EPS = -9  # minimum logscale
 
 
 @torch.jit.script
-def gaussian_kl(q_loc, q_logscale, p_loc, p_logscale):
+def gaussian_kl(
+    q_loc: Tensor,
+    q_logscale: Tensor,
+    p_loc: Tensor,
+    p_logscale: Tensor,
+) -> Tensor:
     return (
         -0.5
         + p_logscale
@@ -20,20 +28,20 @@ def gaussian_kl(q_loc, q_logscale, p_loc, p_logscale):
 
 
 @torch.jit.script
-def sample_gaussian(loc, logscale):
+def sample_gaussian(loc: Tensor, logscale: Tensor) -> Tensor:
     return loc + logscale.exp() * torch.randn_like(loc)
 
 
 class Block(nn.Module):
     def __init__(
         self,
-        in_width,
-        bottleneck,
-        out_width,
-        kernel_size=3,
-        residual=True,
-        down_rate=None,
-        version=None,
+        in_width: int,
+        bottleneck: int,
+        out_width: int,
+        kernel_size: int = 3,
+        residual: bool = True,
+        down_rate: Optional[int] = None,
+        version: Optional[str] = None,
     ):
         super().__init__()
         self.d = down_rate
@@ -64,7 +72,7 @@ class Block(nn.Module):
         if self.residual and (self.d or in_width > out_width):
             self.width_proj = nn.Conv2d(in_width, out_width, 1, 1)
 
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Tensor:
         out = self.conv(x)
         if self.residual:
             if x.shape[1] != out.shape[1]:
@@ -79,7 +87,7 @@ class Block(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, args):
+    def __init__(self, args: Hparams):
         super().__init__()
         # parse architecture
         stages = []
@@ -116,7 +124,7 @@ class Encoder(nn.Module):
             b.conv[-1].weight.data *= np.sqrt(1 / len(blocks))
         self.blocks = nn.ModuleList(blocks)
 
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Dict[int, Tensor]:
         x = self.stem(x)
         acts = {}
         for block in self.blocks:
@@ -129,7 +137,7 @@ class Encoder(nn.Module):
 
 
 class DecoderBlock(nn.Module):
-    def __init__(self, args, in_width, out_width, resolution):
+    def __init__(self, args: Hparams, in_width: int, out_width: int, resolution: int):
         super().__init__()
         bottleneck = int(in_width / args.bottleneck)
         self.res = resolution
@@ -163,7 +171,9 @@ class DecoderBlock(nn.Module):
             in_width, bottleneck, out_width, kernel_size=k, version=args.vr
         )
 
-    def forward_prior(self, z, pa=None, t=None):
+    def forward_prior(
+        self, z: Tensor, pa: Optional[Tensor] = None, t: Optional[float] = None
+    ) -> Tuple[Tensor, Tensor, Tensor]:
         if self.cond_prior:
             z = torch.cat([z, pa], dim=1)
         z = self.prior(z)
@@ -174,7 +184,9 @@ class DecoderBlock(nn.Module):
             p_logscale = p_logscale + torch.tensor(t).to(z.device).log()
         return p_loc, p_logscale, p_features
 
-    def forward_posterior(self, z, x, pa, t=None):
+    def forward_posterior(
+        self, z: Tensor, x: Tensor, pa: Tensor, t: Optional[float] = None
+    ) -> Tuple[Tensor, Tensor]:
         h = torch.cat([z, pa, x], dim=1)
         q_loc, q_logscale = self.posterior(h).chunk(2, dim=1)
         if t is not None:
@@ -183,7 +195,7 @@ class DecoderBlock(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, args):
+    def __init__(self, args: Hparams):
         super().__init__()
         # parse architecture
         stages = []
@@ -207,9 +219,16 @@ class Decoder(nn.Module):
                 )
         self.bias = nn.ParameterList(bias)
         self.cond_prior = args.cond_prior
-        self.is_drop_cond = True if "mnist" in args.hps else False  # hacky
+        self.is_drop_cond = True if "morphomnist" in args.hps else False  # hacky
 
-    def forward(self, parents, x=None, t=None, abduct=False, latents=[]):
+    def forward(
+        self,
+        parents: Tensor,
+        x: Optional[Dict[int, Tensor]] = None,
+        t: Optional[float] = None,
+        abduct: bool = False,
+        latents: List[Tensor] = [],
+    ) -> Tuple[Tensor, List[Dict[str, Tensor]]]:
         # learnt params for each resolution r
         bias = {r.shape[2]: r for r in self.bias}
         h = z = bias[1].repeat(parents.shape[0], 1, 1, 1)  # initial state
@@ -291,7 +310,7 @@ class Decoder(nn.Module):
             b.prior.conv[-1].weight.data *= 0.0
 
     @torch.no_grad()
-    def drop_cond(self):
+    def drop_cond(self) -> Tuple[int, int]:
         opt = dist.Categorical(1 / 3 * torch.ones(3)).sample()
         if opt == 0:  # drop stochastic path
             p_sto, p_det = 0, 1
@@ -303,7 +322,7 @@ class Decoder(nn.Module):
 
 
 class DGaussNet(nn.Module):
-    def __init__(self, args):
+    def __init__(self, args: Hparams):
         super(DGaussNet, self).__init__()
         self.x_loc = nn.Conv2d(
             args.widths[0], args.input_channels, kernel_size=1, stride=1
@@ -332,7 +351,9 @@ class DGaussNet(nn.Module):
             else:
                 NotImplementedError(f"{args.x_like} not implemented.")
 
-    def forward(self, h, x=None, t=None):
+    def forward(
+        self, h: Tensor, x: Optional[Tensor] = None, t: Optional[float] = None
+    ) -> Tuple[Tensor, Tensor]:
         loc, logscale = self.x_loc(h), self.x_logscale(h).clamp(min=EPS)
 
         # for RGB inputs
@@ -366,12 +387,12 @@ class DGaussNet(nn.Module):
             logscale = logscale + torch.tensor(t).to(h.device).log()
         return loc, logscale
 
-    def approx_cdf(self, x):
+    def approx_cdf(self, x: Tensor) -> Tensor:
         return 0.5 * (
             1.0 + torch.tanh(np.sqrt(2.0 / np.pi) * (x + 0.044715 * torch.pow(x, 3)))
         )
 
-    def nll(self, h, x):
+    def nll(self, h: Tensor, x: Tensor) -> Tensor:
         loc, logscale = self.forward(h, x)
         centered_x = x - loc
         inv_stdv = torch.exp(-logscale)
@@ -391,7 +412,9 @@ class DGaussNet(nn.Module):
         )
         return -1.0 * log_probs.mean(dim=(1, 2, 3))
 
-    def sample(self, h, return_loc=True, t=None):
+    def sample(
+        self, h: Tensor, return_loc: bool = True, t: Optional[float] = None
+    ) -> Tuple[Tensor, Tensor]:
         if return_loc:
             x, logscale = self.forward(h)
         else:
@@ -402,7 +425,7 @@ class DGaussNet(nn.Module):
 
 
 class HVAE(nn.Module):
-    def __init__(self, args):
+    def __init__(self, args: Hparams):
         super().__init__()
         args.vr = "light" if "ukbb" in args.hps else None  # hacky
         self.encoder = Encoder(args)
@@ -415,7 +438,7 @@ class HVAE(nn.Module):
         self.free_bits = args.kl_free_bits
         self.register_buffer("log2", torch.tensor(2.0).log())
 
-    def forward(self, x, parents, beta=1):
+    def forward(self, x: Tensor, parents: Tensor, beta: int = 1):
         acts = self.encoder(x)
         h, stats = self.decoder(parents=parents, x=acts)
         nll_pp = self.likelihood.nll(h, x)
@@ -436,11 +459,20 @@ class HVAE(nn.Module):
         nelbo = nll_pp + beta * kl_pp  # negative elbo (free energy)
         return dict(elbo=nelbo, nll=nll_pp, kl=kl_pp)
 
-    def sample(self, parents, return_loc=True, t=None):
+    def sample(
+        self, parents: Tensor, return_loc: bool = True, t: Optional[float] = None
+    ):
         h, _ = self.decoder(parents=parents, t=t)
         return self.likelihood.sample(h, return_loc, t=t)
 
-    def abduct(self, x, parents, cf_parents=None, alpha=0.5, t=None):
+    def abduct(
+        self,
+        x: Tensor,
+        parents: Tensor,
+        cf_parents: Optional[Tensor] = None,
+        alpha: float = 0.5,
+        t: Optional[float] = None,
+    ):
         acts = self.encoder(x)
         _, q_stats = self.decoder(
             x=acts, parents=parents, abduct=True, t=t
@@ -467,8 +499,7 @@ class HVAE(nn.Module):
                 # Option1: mixture distribution: r(z_i | z_{<i}, x, pa, pa*)
                 #   = a*q(z_i | z_{<i}, x, pa) + (1-a)*p(z_i | z_{<i}, pa*)
                 r_loc = alpha * q_loc + (1 - alpha) * p_loc
-                # assumes independence
-                r_var = alpha * q_scale.pow(2) + (1 - alpha) * p_var
+                r_var = alpha * q_scale.pow(2) + (1 - alpha) * p_var  # assumes independence
                 # r_var = a*(q_loc.pow(2) + q_var) + (1-a)*(p_loc.pow(2) + p_var) - r_loc.pow(2)
 
                 # # Option 2: precision weighted distribution
@@ -486,6 +517,8 @@ class HVAE(nn.Module):
         else:
             return q_stats  # zs
 
-    def forward_latents(self, latents, parents, t=None):
+    def forward_latents(
+        self, latents: List[Tensor], parents: Tensor, t: Optional[float] = None
+    ):
         h, _ = self.decoder(latents=latents, parents=parents, t=t)
         return self.likelihood.sample(h, t=t)

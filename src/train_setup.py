@@ -1,22 +1,28 @@
+from typing import Dict, Tuple, Any
+
 import os
 import logging
 import send2trash
 import torch
 
+from torch import nn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from utils import seed_worker, linear_warmup
-from datasets import ukbb, morphomnist, cmnist
+from datasets import ukbb, morphomnist, cmnist, mimic
+from hps import Hparams
 
 
-def setup_dataloaders(args):
+def setup_dataloaders(args: Hparams) -> Dict[str, DataLoader]:
     if "ukbb" in args.hps:
         datasets = ukbb(args)
     elif "morphomnist" in args.hps:
         datasets = morphomnist(args)
     elif "cmnist" in args.hps:
         datasets = cmnist(args)
+    elif "mimic" in args.hps:
+        datasets = mimic(args)
     else:
         NotImplementedError
 
@@ -34,7 +40,9 @@ def setup_dataloaders(args):
     return dataloaders
 
 
-def setup_optimizer(args, model):
+def setup_optimizer(
+    args: Hparams, model: nn.Module
+) -> Tuple[torch.optim.Optimizer, Any]:
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.lr, weight_decay=args.wd, betas=args.betas
     )
@@ -46,7 +54,7 @@ def setup_optimizer(args, model):
     return optimizer, scheduler
 
 
-def setup_directories(args, ckpt_dir="../checkpoints"):
+def setup_directories(args: Hparams, ckpt_dir: str = "../checkpoints") -> str:
     parents_folder = "_".join([k[0] for k in args.parents_x])
     save_dir = os.path.join(ckpt_dir, parents_folder, args.exp_name)
     if os.path.isdir(save_dir):
@@ -71,7 +79,7 @@ def setup_directories(args, ckpt_dir="../checkpoints"):
     return save_dir
 
 
-def setup_tensorboard(args, model):
+def setup_tensorboard(args: Hparams, model: nn.Module) -> SummaryWriter:
     """Setup metric summary writer."""
     writer = SummaryWriter(args.save_dir)
 
@@ -109,7 +117,7 @@ def setup_tensorboard(args, model):
     return writer
 
 
-def setup_logging(args):
+def setup_logging(args: Hparams) -> logging.Logger:
     # reset root logger
     [logging.root.removeHandler(h) for h in logging.root.handlers[:]]
     # info logger for saving command line outputs during training

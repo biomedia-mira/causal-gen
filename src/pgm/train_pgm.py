@@ -1,28 +1,35 @@
+from typing import Dict, Optional, Any
 import sys
-
-sys.path.append("..")
-from train_setup import *
-from datasets import ukbb, get_attr_max_min, morphomnist, cmnist
-from utils import seed_all, seed_worker, EMA
 
 import os
 import copy
 import argparse
 import pyro
-import torch
-import torch.nn as nn
 import numpy as np
 import matplotlib.pyplot as plt
-
-from tqdm import tqdm
+import torch
 from torch.utils.data import DataLoader
+from torch import nn, Tensor
+from tqdm import tqdm
 from sklearn.metrics import roc_auc_score
 
 from utils_pgm import update_stats, plot_joint
 from layers import TraceStorage_ELBO
 
+sys.path.append("..")
+from hps import Hparams
+from train_setup import (
+    setup_logging,
+    setup_directories,
+    setup_tensorboard,
+)
+from datasets import ukbb, get_attr_max_min, morphomnist, cmnist, mimic
+from utils import seed_all, seed_worker, EMA
 
-def preprocess(batch, dataset="ukbb", split="l"):
+
+def preprocess(
+    batch: Dict[str, Tensor], dataset: str = "ukbb", split: str = "l"
+) -> Dict[str, Tensor]:
     if "x" in batch.keys():
         batch["x"] = (batch["x"].float().cuda() - 127.5) / 127.5  # [-1,1]
     # for all other variables except x
@@ -42,12 +49,18 @@ def preprocess(batch, dataset="ukbb", split="l"):
                 k_max, k_min = get_attr_max_min(k)
                 batch[k] = (batch[k] - k_min) / (k_max - k_min)  # [0,1]
                 batch[k] = 2 * batch[k] - 1  # [-1,1]
-            # else:
-            # print(k, batch[k].max(), batch[k].min())
     return batch
 
 
-def ss_train_epoch(args, model, ema, dataloaders, elbo_fn, aux_elbo_fn, optimizer):
+def ss_train_epoch(
+    args: Hparams,
+    model: nn.Module,
+    ema: nn.Module,
+    dataloaders: Dict[str, DataLoader],
+    elbo_fn: TraceStorage_ELBO,
+    aux_elbo_fn: TraceStorage_ELBO,
+    optimizer: torch.optim.Optimizer,
+) -> Dict[str, Any]:
     "semi-supervised training epoch"
     stats = {"loss": 0, "aux_loss": 0, "n": 0}  # sample counter
     alpha = args.alpha * len(dataloaders["l"].dataset)
@@ -62,7 +75,7 @@ def ss_train_epoch(args, model, ema, dataloaders, elbo_fn, aux_elbo_fn, optimize
     loader = tqdm(range(len(iter_outer)))
 
     model.train()
-    for i in loader:
+    for _ in loader:
         batch = {}
         batch[outer] = next(iter_outer)
         batch[outer] = preprocess(batch[outer], args.dataset, split=outer)
@@ -100,7 +113,15 @@ def ss_train_epoch(args, model, ema, dataloaders, elbo_fn, aux_elbo_fn, optimize
     return stats
 
 
-def sup_epoch(args, model, ema, dataloader, elbo_fn, optimizer=None, is_train=True):
+def sup_epoch(
+    args: Hparams,
+    model: nn.Module,
+    ema: Optional[nn.Module],
+    dataloader: Dict[str, DataLoader],
+    elbo_fn: TraceStorage_ELBO,
+    optimizer: Optional[torch.optim.Optimizer] = None,
+    is_train: bool = True,
+) -> Dict[str, Any]:
     "supervised epoch"
     stats = {"loss": 0, "n": 0}  # sample counter
     loader = tqdm(
@@ -156,8 +177,10 @@ def sup_epoch(args, model, ema, dataloader, elbo_fn, optimizer=None, is_train=Tr
 
 
 @torch.no_grad()
-def eval_epoch(args, model, dataloader):
-    "this can consume lots of memory if dataset is large"
+def eval_epoch(
+    args: Hparams, model: nn.Module, dataloader: DataLoader
+) -> Dict[str, float]:
+    "caution: this can consume lots of memory if dataset is large"
     model.eval()
     preds = {k: [] for k in model.variables.keys()}
     targets = {k: [] for k in model.variables.keys()}
@@ -174,8 +197,7 @@ def eval_epoch(args, model, dataloader):
 
     for k, v in preds.items():
         preds[k] = torch.stack(v).squeeze().cpu()
-        targets[k] = torch.stack(targets[k])
-
+        targets[k] = torch.stack(targets[k]).squeeze()
     stats = {}
     for k in model.variables.keys():
         if "ukbb" in args.dataset:
@@ -206,12 +228,33 @@ def eval_epoch(args, model, dataloader):
         elif args.dataset == "cmnist":
             num_corrects = (targets[k].argmax(-1) == preds[k].argmax(-1)).sum()
             stats[k + "_acc"] = num_corrects.item() / targets[k].shape[0]
+        elif "mimic" in args.dataset:
+            if k in ["sex", "finding"]:
+                stats[k + "_rocauc"] = roc_auc_score(
+                    targets[k].numpy(), preds[k].numpy(), average="macro"
+                )
+                stats[k + "_acc"] = (
+                    targets[k] == torch.round(preds[k])
+                ).sum().item() / targets[k].shape[0]
+            elif k == "age":
+                preds_k = (preds[k] + 1) * 50  # unormalize
+                targets_k = (targets[k] + 1) * 50  # unormalize
+                stats[k + "_mae"] = (targets_k - preds_k).abs().mean().item()
+            elif k == "race":
+                num_corrects = (targets[k].argmax(-1) == preds[k].argmax(-1)).sum()
+                stats[k + "_acc"] = num_corrects.item() / targets[k].shape[0]
+                stats[k + "_rocauc"] = roc_auc_score(
+                    targets[k].numpy(),
+                    preds[k].numpy(),
+                    multi_class="ovr",
+                    average="macro",
+                )
         else:
             NotImplementedError
     return stats
 
 
-def setup_dataloaders(args):
+def setup_dataloaders(args: Hparams) -> Dict[str, DataLoader]:
     if "ukbb" in args.dataset:
         datasets = ukbb(args)
     elif args.dataset == "morphomnist":
@@ -229,6 +272,8 @@ def setup_dataloaders(args):
         args.parents_x = ["digit", "colour"]
         args.concat_pa = False
         datasets = cmnist(args)
+    elif args.dataset == "mimic":
+        datasets = mimic(args)
     else:
         NotImplementedError
 
