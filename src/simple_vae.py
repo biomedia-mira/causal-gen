@@ -1,11 +1,10 @@
-from typing import Dict, Optional, Tuple, Union, Any, List
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
-from torch import nn, Tensor
-
 import torch.distributions as dist
 import torch.distributions.transforms as T
+from torch import Tensor, nn
 
 from hps import Hparams
 

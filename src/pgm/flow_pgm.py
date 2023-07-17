@@ -1,22 +1,22 @@
 from typing import Dict
 
 import numpy as np
-import torch
-import torch.nn.functional as F
-from torch import nn, Tensor
 import pyro
 import pyro.distributions as dist
 import pyro.distributions.transforms as T
-from pyro.nn import DenseNN
-from pyro.infer.reparam.transform import TransformReparam
-from pyro.distributions.conditional import ConditionalTransformedDistribution
-
-from layers import (
-    MLP, CNN,  # fmt: skip
-    ConditionalGumbelMax,
+import torch
+import torch.nn.functional as F
+from layers import (  # fmt: skip
+    CNN,
+    MLP,
     ConditionalAffineTransform,
+    ConditionalGumbelMax,
     ConditionalTransformedDistributionGumbelMax,
 )
+from pyro.distributions.conditional import ConditionalTransformedDistribution
+from pyro.infer.reparam.transform import TransformReparam
+from pyro.nn import DenseNN
+from torch import Tensor, nn
 
 from hps import Hparams
 
@@ -566,7 +566,7 @@ class ChestPGM(BasePGM):
         self.race_logits = nn.Parameter(np.log(1 / 3) * torch.ones(1, 3))
 
         if args.setup != "sup_pgm":
-            from resnet import ResNet, ResNet18, CustomBlock
+            from resnet import CustomBlock, ResNet, ResNet18
 
             shared_model = ResNet(
                 CustomBlock,

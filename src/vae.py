@@ -1,9 +1,10 @@
 from typing import Dict, List, Optional, Tuple
+
 import numpy as np
 import torch
-import torch.nn.functional as F
 import torch.distributions as dist
-from torch import nn, Tensor
+import torch.nn.functional as F
+from torch import Tensor, nn
 
 from hps import Hparams
 
@@ -12,10 +13,7 @@ EPS = -9  # minimum logscale
 
 @torch.jit.script
 def gaussian_kl(
-    q_loc: Tensor,
-    q_logscale: Tensor,
-    p_loc: Tensor,
-    p_logscale: Tensor,
+    q_loc: Tensor, q_logscale: Tensor, p_loc: Tensor, p_logscale: Tensor
 ) -> Tensor:
     return (
         -0.5
@@ -438,7 +436,7 @@ class HVAE(nn.Module):
         self.free_bits = args.kl_free_bits
         self.register_buffer("log2", torch.tensor(2.0).log())
 
-    def forward(self, x: Tensor, parents: Tensor, beta: int = 1):
+    def forward(self, x: Tensor, parents: Tensor, beta: int = 1) -> Dict[str, Tensor]:
         acts = self.encoder(x)
         h, stats = self.decoder(parents=parents, x=acts)
         nll_pp = self.likelihood.nll(h, x)
@@ -451,7 +449,7 @@ class HVAE(nn.Module):
                 ).sum()
         else:
             kl_pp = torch.zeros_like(nll_pp)
-            for i, stat in enumerate(stats):
+            for _, stat in enumerate(stats):
                 kl_pp += stat["kl"].sum(dim=(1, 2, 3))
         kl_pp = kl_pp / np.prod(x.shape[1:])  # per pixel
         kl_pp = kl_pp.mean()  # / self.log2
@@ -461,7 +459,7 @@ class HVAE(nn.Module):
 
     def sample(
         self, parents: Tensor, return_loc: bool = True, t: Optional[float] = None
-    ):
+    ) -> Tuple[Tensor, Tensor]:
         h, _ = self.decoder(parents=parents, t=t)
         return self.likelihood.sample(h, return_loc, t=t)
 
@@ -472,7 +470,7 @@ class HVAE(nn.Module):
         cf_parents: Optional[Tensor] = None,
         alpha: float = 0.5,
         t: Optional[float] = None,
-    ):
+    ) -> List[Tensor]:
         acts = self.encoder(x)
         _, q_stats = self.decoder(
             x=acts, parents=parents, abduct=True, t=t
@@ -499,7 +497,9 @@ class HVAE(nn.Module):
                 # Option1: mixture distribution: r(z_i | z_{<i}, x, pa, pa*)
                 #   = a*q(z_i | z_{<i}, x, pa) + (1-a)*p(z_i | z_{<i}, pa*)
                 r_loc = alpha * q_loc + (1 - alpha) * p_loc
-                r_var = alpha * q_scale.pow(2) + (1 - alpha) * p_var  # assumes independence
+                r_var = (
+                    alpha * q_scale.pow(2) + (1 - alpha) * p_var
+                )  # assumes independence
                 # r_var = a*(q_loc.pow(2) + q_var) + (1-a)*(p_loc.pow(2) + p_var) - r_loc.pow(2)
 
                 # # Option 2: precision weighted distribution
@@ -519,6 +519,6 @@ class HVAE(nn.Module):
 
     def forward_latents(
         self, latents: List[Tensor], parents: Tensor, t: Optional[float] = None
-    ):
+    ) -> Tuple[Tensor, Tensor]:
         h, _ = self.decoder(latents=latents, parents=parents, t=t)
         return self.likelihood.sample(h, t=t)

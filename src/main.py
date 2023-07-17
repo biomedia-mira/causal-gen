@@ -1,22 +1,23 @@
-import os
-import gc
 import argparse
+import gc
+import os
 import traceback
+
 import send2trash
 import torch
 
 from hps import Hparams
-from vae import HVAE
 from simple_vae import VAE
 from train_setup import (
     setup_dataloaders,
-    setup_logging,
     setup_directories,
+    setup_logging,
     setup_optimizer,
     setup_tensorboard,
 )
-from utils import seed_all, EMA
 from trainer import trainer
+from utils import EMA, seed_all
+from vae import HVAE
 
 
 def main(args: Hparams):

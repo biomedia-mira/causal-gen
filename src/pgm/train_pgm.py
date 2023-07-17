@@ -1,30 +1,25 @@
-from typing import Dict, Optional, Any
-import sys
-
-import os
-import copy
 import argparse
-import pyro
-import numpy as np
-import matplotlib.pyplot as plt
-import torch
-from torch.utils.data import DataLoader
-from torch import nn, Tensor
-from tqdm import tqdm
-from sklearn.metrics import roc_auc_score
+import copy
+import os
+import sys
+from typing import Any, Dict, Optional
 
-from utils_pgm import update_stats, plot_joint
+import matplotlib.pyplot as plt
+import numpy as np
+import pyro
+import torch
 from layers import TraceStorage_ELBO
+from sklearn.metrics import roc_auc_score
+from torch import Tensor, nn
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+from utils_pgm import plot_joint, update_stats
 
 sys.path.append("..")
+from datasets import cmnist, get_attr_max_min, mimic, morphomnist, ukbb
 from hps import Hparams
-from train_setup import (
-    setup_logging,
-    setup_directories,
-    setup_tensorboard,
-)
-from datasets import ukbb, get_attr_max_min, morphomnist, cmnist, mimic
-from utils import seed_all, seed_worker, EMA
+from train_setup import setup_directories, setup_logging, setup_tensorboard
+from utils import EMA, seed_all, seed_worker
 
 
 def preprocess(

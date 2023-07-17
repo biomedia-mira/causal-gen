@@ -1,16 +1,15 @@
-from typing import Dict, Optional, Any
 import os
-import torch
+import sys
+from typing import Any, Dict, Optional
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-
-import matplotlib.pyplot as plt
-from matplotlib import colors
-from torch import nn, Tensor
-
+import torch
 from layers import TraceStorage_ELBO
-import sys
+from matplotlib import colors
+from torch import Tensor, nn
 
 sys.path.append("..")
 from hps import Hparams

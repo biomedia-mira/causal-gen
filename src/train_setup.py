@@ -1,17 +1,16 @@
-from typing import Dict, Tuple, Any
-
-import os
 import logging
+import os
+from typing import Any, Dict, Tuple
+
 import send2trash
 import torch
-
 from torch import nn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from utils import seed_worker, linear_warmup
-from datasets import ukbb, morphomnist, cmnist, mimic
+from datasets import cmnist, mimic, morphomnist, ukbb
 from hps import Hparams
+from utils import linear_warmup, seed_worker
 
 
 def setup_dataloaders(args: Hparams) -> Dict[str, DataLoader]:

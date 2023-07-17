@@ -1,15 +1,9 @@
+from typing import Callable, List, Optional, Type, Union
+
 import torch
 import torch.nn as nn
-
-from typing import Callable, List, Optional, Type, Union
 from torch import Tensor
-
-from torchvision.models.resnet import (
-    conv1x1,
-    conv3x3,
-    Bottleneck,
-    _log_api_usage_once,
-)
+from torchvision.models.resnet import Bottleneck, _log_api_usage_once, conv1x1, conv3x3
 
 
 class CustomBlock(nn.Module):

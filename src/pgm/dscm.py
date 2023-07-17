@@ -4,13 +4,12 @@ sys.path.append("..")
 from typing import Dict
 
 import torch
-from torch import nn, Tensor
-
 from layers import TraceStorage_ELBO
+from torch import Tensor, nn
 from utils_pgm import check_nan
 
-from hps import Hparams
 from datasets import get_attr_max_min
+from hps import Hparams
 
 
 class DSCM(nn.Module):

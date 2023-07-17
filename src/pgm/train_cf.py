@@ -1,28 +1,27 @@
-from typing import Dict, Any, List, Tuple, Optional
-import os
-import sys
-import copy
-import random
 import argparse
+import copy
+import os
+import random
+import sys
+from typing import Any, Dict, List, Optional, Tuple
 
-import torch
-from torch import nn, Tensor
-from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
-from tqdm import tqdm
-from sklearn.metrics import roc_auc_score
-
-from train_pgm import preprocess, sup_epoch, eval_epoch
-from utils_pgm import plot_cf, update_stats
-from layers import TraceStorage_ELBO
-from flow_pgm import FlowPGM
+import torch
 from dscm import DSCM
+from flow_pgm import FlowPGM
+from layers import TraceStorage_ELBO
+from sklearn.metrics import roc_auc_score
+from torch import Tensor, nn
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+from train_pgm import eval_epoch, preprocess, sup_epoch
+from utils_pgm import plot_cf, update_stats
 
 sys.path.append("..")
-from train_setup import setup_directories, setup_tensorboard, setup_logging
 from datasets import get_attr_max_min
-from utils import EMA, seed_all
 from hps import Hparams
+from train_setup import setup_directories, setup_logging, setup_tensorboard
+from utils import EMA, seed_all
 from vae import HVAE
 
 

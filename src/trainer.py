@@ -1,16 +1,16 @@
-from typing import Dict, Union, Any
-import os
 import copy
 import logging
+import os
+from typing import Any, Dict
 
 import torch
-from torch import nn, Tensor
+from torch import Tensor, nn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-from utils import linear_warmup, write_images
 from hps import Hparams
+from utils import linear_warmup, write_images
 
 
 def preprocess_batch(args: Hparams, batch: Dict[str, Tensor], expand_pa: bool = False):

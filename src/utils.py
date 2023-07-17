@@ -1,13 +1,13 @@
+import copy
+import os
+import random
 from typing import Dict, List, Optional
 
-import os
-import copy
 import imageio
-import random
 import numpy as np
 import torch
 import torch.nn as nn
-from torch import nn, Tensor
+from torch import Tensor, nn
 
 from hps import Hparams
 
@@ -248,14 +248,14 @@ def write_images(args: Hparams, model: nn.Module, batch: Dict[str, Tensor]):
         alpha: Optional[float] = None,
         t: Optional[float] = None,
     ):
-        """ Note that this function is only here for debugging purposes.
-        It does not take into account the associated causal graph nor infer x's 
-        (observation space) exogenous noise term "u". For a complete example of 
-        counterfactual inference you may refer to our demo:
-         
+        """Note that this function is only here for debugging purposes.
+        It does not take into account the associated causal graph nor infer x's
+        (observation space) exogenous noise term "u". For a complete example of
+        counterfactual inference you may refer to pgm/dscm.py or our demo:
+
           https://huggingface.co/spaces/mira-causality/counterfactuals/blob/main/app.py
-         
-        (specifically the counterfactual_inference() function).
+          (specifically the counterfactual_inference() function).
+
         """
         # x = g(pa, z)
         x_rec, _ = model.forward_latents(latents=z, parents=pa, t=t)

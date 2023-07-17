@@ -1,20 +1,18 @@
 from typing import Dict
 
+import pyro
 import torch
 import torch.nn.functional as F
-from torch import nn
-
-import pyro
 from pyro.distributions.conditional import (
-    ConditionalTransformModule,
     ConditionalTransformedDistribution,
+    ConditionalTransformModule,
     TransformedDistribution,
 )
 from pyro.distributions.torch_distribution import TorchDistributionMixin
-
+from torch import nn
 from torch.distributions import constraints
-from torch.distributions.utils import _sum_rightmost
 from torch.distributions.transforms import Transform
+from torch.distributions.utils import _sum_rightmost
 
 
 class TraceStorage_ELBO(pyro.infer.Trace_ELBO):

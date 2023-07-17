@@ -1,23 +1,22 @@
-from typing import Tuple, Optional, List, Dict, TypedDict
-
-import os
 import gzip
-import struct
+import os
 import random
+import struct
+from typing import Dict, List, Optional, Tuple, TypedDict
+
 import numpy as np
 import pandas as pd
 import torch
-from torch import Tensor
+import torch.nn.functional as F
 import torchvision
 import torchvision.transforms as TF
-import torch.nn.functional as F
-
-from torch.utils.data import Dataset
 from PIL import Image
+from torch import Tensor
+from torch.utils.data import Dataset
 from tqdm import tqdm
 
-from utils import normalize, log_standardize
 from hps import Hparams
+from utils import log_standardize, normalize
 
 
 class UKBBDataset(Dataset):
