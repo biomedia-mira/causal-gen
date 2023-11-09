@@ -498,7 +498,7 @@ class HVAE(nn.Module):
                 #   = a*q(z_i | z_{<i}, x, pa) + (1-a)*p(z_i | z_{<i}, pa*)
                 r_loc = alpha * q_loc + (1 - alpha) * p_loc
                 r_var = (
-                    alpha * q_scale.pow(2) + (1 - alpha) * p_var
+                    alpha.pow(2) * q_scale.pow(2) + (1 - alpha).pow(2) * p_var
                 )  # assumes independence
                 # r_var = a*(q_loc.pow(2) + q_var) + (1-a)*(p_loc.pow(2) + p_var) - r_loc.pow(2)
 
