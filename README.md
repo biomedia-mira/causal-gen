@@ -7,16 +7,20 @@ Code for the **ICML 2023** paper:
 >Fabio De Sousa Ribeiro<sup>1</sup>, Tian Xia<sup>1</sup>, Miguel Monteiro<sup>1</sup>, Nick Pawlowski<sup>2</sup>, Ben Glocker<sup>1</sup>\
 ><sup>1</sup>Imperial College London, <sup>2</sup>Microsoft Research Cambridge, UK
 
-BibTeX (arXiv for now):
+BibTeX:
 ```
-@misc{ribeiro2023high,
-      title={High Fidelity Image Counterfactuals with Probabilistic Causal Models}, 
-      author={Fabio De Sousa Ribeiro and Tian Xia and Miguel Monteiro and Nick Pawlowski and Ben Glocker},
-      year={2023},
-      eprint={2306.15764},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG}
+@InProceedings{pmlr-v202-de-sousa-ribeiro23a,
+  title={High Fidelity Image Counterfactuals with Probabilistic Causal Models},
+  author={De Sousa Ribeiro, Fabio and Xia, Tian and Monteiro, Miguel and Pawlowski, Nick and Glocker, Ben},
+  booktitle={Proceedings of the 40th International Conference on Machine Learning},
+  pages={7390--7425},
+  year={2023},
+  volume={202},
+  series={Proceedings of Machine Learning Research},
+  month={23--29 Jul},
+  url={https://proceedings.mlr.press/v202/de-sousa-ribeiro23a.html}
 }
+
 ```
 ### Example Results:
 <img src="imgs/ukbb.png" width="100%" height="100%">
@@ -96,5 +100,3 @@ Example (loose) steps to add your own dataset and associated SCM:
 If you'd like to make the HVAE more lightweight you can try reducing the number of blocks at each resolution and reducing the block width (hyperparameters `enc_arch`, `dec_arch`, and `width` found in `src/hps.py`). The block `version == "light"` in `src/vae.py` also uses half as much VRAM.
 
 To resume training from a checkpoint simply adjust the argument: `--resume=/path/to/your/checkpoint.pt`.
-
-(readme is a work in progress)
