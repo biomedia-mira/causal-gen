@@ -434,7 +434,7 @@ class HVAE(nn.Module):
             NotImplementedError(f"{args.x_like} not implemented.")
         self.cond_prior = args.cond_prior
         self.free_bits = args.kl_free_bits
-        self.register_buffer("log2", torch.tensor(2.0).log())
+        # self.register_buffer("log2", torch.tensor(2.0).log())
 
     def forward(self, x: Tensor, parents: Tensor, beta: int = 1) -> Dict[str, Tensor]:
         acts = self.encoder(x)
@@ -482,8 +482,6 @@ class HVAE(nn.Module):
             p_stats = [s["z"] for s in p_stats]
 
             cf_zs = []
-            t = torch.tensor(t).to(x.device)  # z* sampling temperature
-
             for i in range(len(q_stats)):
                 # from z_i ~ q(z_i | z_{<i}, x, pa)
                 q_loc = q_stats[i]["q_loc"]
@@ -498,7 +496,7 @@ class HVAE(nn.Module):
                 #   = a*q(z_i | z_{<i}, x, pa) + (1-a)*p(z_i | z_{<i}, pa*)
                 r_loc = alpha * q_loc + (1 - alpha) * p_loc
                 r_var = (
-                    alpha**2 * q_scale.pow(2) + (1 - alpha)**2 * p_var
+                    alpha**2 * q_scale.pow(2) + (1 - alpha) ** 2 * p_var
                 )  # assumes independence
                 # r_var = a*(q_loc.pow(2) + q_var) + (1-a)*(p_loc.pow(2) + p_var) - r_loc.pow(2)
 
