@@ -1,3 +1,4 @@
 datasets/mnist_digit_colour
 .vscode
 .mypy_cache
+*.pyc
