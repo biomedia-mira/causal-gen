@@ -97,6 +97,8 @@ Example (loose) steps to add your own dataset and associated SCM:
 3. Adjust HVAE hyperparameters needed for your dataset (input resolution, architecture, etc) in `src/hps.py`
 4. Train the HVAE mechanism as above, and train all other mechanisms (separately) using `src/pgm/train_pgm.py`
 
+Note: `src/pgm/train_cf.py` implements the optional counterfactual training/fine-tuning procedure outlined in Section 3.4 of the paper. This step may not be necessary if the model already performs well enough at counterfactual inference.
+
 If you'd like to make the HVAE more lightweight you can try reducing the number of blocks at each resolution and reducing the block width (hyperparameters `enc_arch`, `dec_arch`, and `width` found in `src/hps.py`). The block `version == "light"` in `src/vae.py` also uses half as much VRAM.
 
 To resume training from a checkpoint simply adjust the argument: `--resume=/path/to/your/checkpoint.pt`.
